@@ -1,0 +1,10 @@
+{
+  "name": "Atlas Dev Engine",
+  "enabled": false,
+  "command": ["{python}", "{project}/src/dev_engine/atlas_dev_engine_mcp.py"],
+  "cwd": "{project}/src/dev_engine",
+  "env": {
+    "ATLAS_DEV_PROJECT_ROOT": "F:\\APP-DEV\\projects\\atlas-chat",
+    "ATLAS_DEV_ENGINE_HOME": "%LOCALAPPDATA%\\Atlas\\DevEngine"
+  }
+}

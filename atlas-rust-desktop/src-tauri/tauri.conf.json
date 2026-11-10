@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Atlas Chat",
+  "version": "0.1.1",
+  "identifier": "dev.atlas.chat",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Atlas Chat",
+        "width": 1380,
+        "height": 900,
+        "minWidth": 760,
+        "minHeight": 560,
+        "dragDropEnabled": false,
+        "backgroundColor": "#17131f"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:8090 http://127.0.0.1:8080; frame-src http://127.0.0.1:8090 http://127.0.0.1:8080 http://127.0.0.1:8091; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/atlas": "atlas"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "nsis/installer.nsi",
+        "installerHooks": "nsis/f-drive-only.nsh",
+        "compression": "zlib"
+      }
+    }
+  }
+}

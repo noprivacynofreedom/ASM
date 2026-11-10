@@ -1,0 +1,12 @@
+# Laptop llama-swap config. Copy to the laptop, for example C:\atlas\llama-swap\config.yaml
+# Edit every path below. Do NOT keep the PC paths (F:\...). Wrong paths cause
+# "upstream command exited prematurely".
+# Use ONE small model for a laptop with a small GPU: 7B or 14B at Q4 (14B Q4 needs about 9 GB).
+models:
+  "laptop-7b":
+    cmd: >
+      C:\atlas\llama-cpp\llama-server.exe
+      --port ${PORT}
+      -m C:\atlas\models\YOUR-7B-MODEL-Q4_K_M.gguf
+      -ngl 99 -c 8192
+    ttl: 600

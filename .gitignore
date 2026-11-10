@@ -1,0 +1,45 @@
+data.json
+.webview/
+*.tmp
+__pycache__/
+settings.local.json
+exports/
+
+# Local build and interpreter caches
+**/__pycache__/
+*.py[cod]
+**/node_modules/
+**/target/
+*.tsbuildinfo
+.pytest_cache/
+
+# The installed app (F:-only install location)
+/Atlas Chat/
+/app/
+
+# Recovered desktop app: generated output, the 1.3 GB bundled Python, and local data stay out of git
+/atlas-rust-desktop/dist/
+/atlas-rust-desktop/src-tauri/gen/
+/atlas-rust-desktop/src-tauri/resources/atlas/runtime/
+/atlas-rust-desktop/src-tauri/resources/atlas/swarm-workspaces/
+/atlas-rust-desktop/src-tauri/resources/atlas/settings.json
+/atlas-rust-desktop/src-tauri/resources/atlas/data.json
+/atlas-rust-desktop/src-tauri/resources/atlas/data/
+/atlas-rust-desktop/src-tauri/resources/atlas/logs/
+
+# Local-only folders: never commit (bundled Python copy, tools, backups, logs, app data)
+/runtime/
+/swpr/
+/backups/
+/.atlas/
+/logs/
+/data/
+/build-logs/
+/swarm-workspaces/
+/s.txt
+/atlas-rust-desktop/*.zip
+
+# Build/patch audit output: installers up to 500 MB each, never commit
+/.atlas-patch-audit/
+*-setup.exe
+*.msi

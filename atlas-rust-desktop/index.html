@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#100b1a" />
+  <title>Atlas Chat</title>
+  <style>
+    :root{color-scheme:dark;font-family:Segoe UI,system-ui,sans-serif;background:#100b1a;color:#f3edff}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 10%,rgba(116,57,178,.22),transparent 52%),#100b1a}
+    /* Splash card only: scoped so it cannot restyle the app's own <main> pages (Node, Operations). */
+    #root>main:not(.shell){width:min(440px,calc(100vw - 36px));padding:34px;border:1px solid rgba(183,137,255,.22);border-radius:18px;background:linear-gradient(145deg,rgba(39,24,57,.96),rgba(22,14,34,.98));box-shadow:0 28px 90px rgba(0,0,0,.48)}
+    #root>main:not(.shell) .mark{display:grid;place-items:center;width:42px;height:42px;margin-bottom:22px;border:1px solid rgba(197,155,255,.3);border-radius:12px;background:linear-gradient(145deg,#58327d,#29183d);color:#e0c4ff;font-size:23px;box-shadow:0 0 30px rgba(153,87,222,.18)}
+    #root>main:not(.shell) .tag{color:#bd91f5;font:10px ui-monospace,monospace;letter-spacing:.19em}
+    h1{margin:9px 0 7px;font-size:21px;letter-spacing:.06em}
+    p{margin:0;color:#a99abf;font-size:13px;line-height:1.7}
+    #root>main:not(.shell) .pulse{height:3px;margin-top:25px;overflow:hidden;border-radius:4px;background:#281a39}
+    #root>main:not(.shell) .pulse i{display:block;width:38%;height:100%;border-radius:4px;background:linear-gradient(90deg,#7944bd,#d0a4ff);animation:load 1.6s ease-in-out infinite alternate}
+    @keyframes load{from{transform:translateX(-8%)}to{transform:translateX(180%)}}
+    @media(prefers-reduced-motion:reduce){#root>main:not(.shell) .pulse i{animation:none;width:100%}}
+  </style>
+</head>
+<body>
+  <div id="root">
+    <main>
+      <div class="mark">✦</div>
+      <div class="tag">ATLAS // DESKTOP</div>
+      <h1>Local intelligence. Your machine.</h1>
+      <p>Preparing your workspace…</p>
+      <div class="pulse"><i></i></div>
+    </main>
+  </div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+from pathlib import Path
+import unittest
+
+ROOT=Path(__file__).resolve().parents[1]
+RUST=(ROOT/'atlas-rust-desktop/src-tauri/src/atlas_node.rs').read_text(encoding='utf-8')
+MAIN=(ROOT/'atlas-rust-desktop/src-tauri/src/main.rs').read_text(encoding='utf-8')
+APP=(ROOT/'atlas-rust-desktop/src/App.tsx').read_text(encoding='utf-8')
+CONTRACT=(ROOT/'docs/atlas-node/GATEWAY-CONTRACT.md').read_text(encoding='utf-8')
+
+class AtlasNodeIntegrationTests(unittest.TestCase):
+    def test_node_identity_uses_ed25519_and_sha256_fingerprint(self):
+        self.assertIn('Ed25519KeyPair::generate_pkcs8',RUST)
+        self.assertIn('digest::SHA256',RUST)
+        self.assertIn('identity.pk8',RUST)
+    def test_registration_is_challenge_response_and_remote_requires_tls(self):
+        self.assertIn('/v1/nodes/challenge',RUST)
+        self.assertIn('/v1/nodes/register',RUST)
+        self.assertIn('Refusing to send node identity over an insecure remote connection',RUST)
+    def test_remote_execution_fails_closed_and_uses_container_restrictions(self):
+        for fragment in ['if !c.enabled || !c.allow_remote_workloads','@sha256:','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--pids-limit=128','Duration::from_secs(900)']:
+            self.assertIn(fragment,RUST)
+    def test_local_receipts_never_claim_verified(self):
+        self.assertIn('"verified":false',RUST)
+        self.assertIn('executed_unverified',RUST)
+        self.assertIn('node_signature_hex',RUST)
+    def test_desktop_exposes_node_dashboard_and_keeps_chat_view(self):
+        self.assertIn('node_status',MAIN)
+        self.assertIn('node_execute_workload',MAIN)
+        self.assertIn('ATLAS NODE',APP)
+        self.assertIn('title="Atlas Chat"',APP)
+    def test_llama_swap_openai_compatible_model_api_supported(self):
+        self.assertIn('http://127.0.0.1:8080',RUST)
+        self.assertIn('/v1/models',RUST)
+        self.assertIn('/v1/chat/completions',RUST)
+    def test_workload_cancellation_targets_container_and_owned_cli(self):
+        self.assertIn('--cidfile',RUST)
+        self.assertIn('active_container_id',RUST)
+        self.assertIn('\"stop\",\"--time\",\"3\"',RUST)
+    def test_desktop_exit_waits_for_owned_process_shutdown(self):
+        for fragment in ['RunEvent::ExitRequested','api.prevent_exit()','shutdown_started.compare_exchange','shutdown_complete.store(true','children.stop()','handle.exit(0)']:
+            self.assertIn(fragment,MAIN)
+    def test_service_startup_and_manual_stop_use_async_child_lock(self):
+        self.assertIn('state.children.lock().await',MAIN)
+        self.assertIn('guard.start().await',MAIN)
+        self.assertIn('guard.stop()',MAIN)
+    def test_gateway_contract_documents_server_side_requirements(self):
+        for fragment in ['/v1/nodes/heartbeat','/v1/workloads/claim','/v1/workloads/complete','/v1/inference','settlement','replay']:
+            self.assertIn(fragment,CONTRACT)
+
+if __name__=='__main__': unittest.main(verbosity=2)

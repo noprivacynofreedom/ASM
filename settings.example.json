@@ -1,0 +1,15 @@
+{
+  "mcp_servers": [
+    {
+      "name": "atlas-commander",
+      "command": [
+        "{python}",
+        "{project}/src/mcp_commander.py"
+      ],
+      "cwd": "{project}",
+      "enabled": true
+    }
+  ],
+  "compute_peers": [],
+  "compute_allow_public": false
+}

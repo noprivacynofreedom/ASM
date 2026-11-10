@@ -1,0 +1,6 @@
+# Optional knowledge ingestion extras. Install into the same Python used by Atlas.
+PyMuPDF>=1.24.0
+pypdf>=5.0.0
+Pillow>=10.0.0
+pytesseract>=0.3.13
+fastembed>=0.6.0
