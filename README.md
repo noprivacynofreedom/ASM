@@ -76,6 +76,16 @@ Setup steps are in [docs/compute-sharing/LAPTOP-SETUP.md](docs/compute-sharing/L
 
 The Atlas Node tab also has a part for a future paid network. **That part does not work yet.** It needs a gateway that does not exist. Do not expect any of it to do anything.
 
+## Coding swarm (work in progress)
+
+`agents/` has a separate coding swarm. It is not the `/swarm` chat command. It is scripts that split a coding job between workers. Rules that the code enforces:
+
+- It rejects protected output paths.
+- It runs commands with no shell, and with a time limit of 300 seconds at most.
+- It only talks to your local model endpoint. It never calls a cloud model.
+
+`agents/README.md` describes the local API that agents use to report their status to Atlas. That API only listens on `127.0.0.1`.
+
 ## What is tested
 
 - Backend tests: `python -m unittest discover -s ../../../validation-tests -p "test_*.py"` from `atlas-rust-desktop/src-tauri/resources/atlas`. They pass in my cloud setup.
@@ -106,6 +116,10 @@ It checks the backend, builds the app and an installer, and prints the installer
 | `validation-tests/`, `tests/` | Tests |
 | `docs/` | Notes and the compute-sharing guide |
 | `settings.example.json` | Copy to `settings.json` and edit |
+
+## What is not in this repo
+
+The paid gateway and control plane are not here. The gateway fields in the Atlas Node tab do nothing without them. You do not need them to run Atlas.
 
 ## Licence
 
