@@ -2,6 +2,7 @@
 mod atlas_node;
 mod evidence;
 mod process_supervisor;
+mod sandbox;
 mod telemetry;
 
 use serde::Serialize;
@@ -88,6 +89,31 @@ async fn health_check() -> Health {
             .map(|r| format!("HTTP {}", r.status()))
             .unwrap_or_else(|e| e.to_string()),
     }
+}
+/// True when something accepts a TCP connection at the URL's host and port.
+/// An iframe fires onLoad for error pages too, so the UI asks this first.
+#[tauri::command]
+async fn probe_viewer(url: String) -> bool {
+    tokio::task::spawn_blocking(move || {
+        use std::net::{TcpStream, ToSocketAddrs};
+        let rest = url.trim().split("://").nth(1).unwrap_or("");
+        let host_port = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let target = if host_port.contains(':') {
+            host_port.to_string()
+        } else if url.trim().to_ascii_lowercase().starts_with("https") {
+            format!("{host_port}:443")
+        } else {
+            format!("{host_port}:80")
+        };
+        target
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next())
+            .map(|addr| TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok())
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
 }
 #[tauri::command]
 fn system_metrics() -> telemetry::SystemMetrics {
@@ -291,6 +317,7 @@ fn main() {
     tauri::Builder::default()
         .manage(RuntimeState::default())
         .manage(NodeState::new())
+        .manage(Arc::new(sandbox::Sandbox::new()))
         .setup(|app| {
             #[cfg(debug_assertions)]
             let runtime_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -319,14 +346,26 @@ fn main() {
             #[cfg(debug_assertions)]
             std::env::set_var("ATLAS_PROJECT_ROOT", &runtime_root);
             let manager = app.state::<NodeState>().manager.clone();
+            // Fills the cached GPU list and Docker flag. Without this the UI shows 0 GPU(s) forever.
+            let hw_manager = manager.clone();
+            tauri::async_runtime::spawn(async move {
+                hw_manager.run_hardware_discovery().await;
+            });
             tauri::async_runtime::spawn(async move {
                 manager.run_agent_loop().await;
             });
+            // Starts the coder sandbox (Docker) in the background. It is stopped again when Atlas closes.
+            // ATLAS_SANDBOX_AUTOSTART=0 turns this off. Details go to <data>\logs\sandbox.log.
+            sandbox::autostart(
+                app.state::<Arc<sandbox::Sandbox>>().inner().clone(),
+                f_data("logs").join("sandbox.log"),
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             health_check,
             system_metrics,
+            probe_viewer,
             local_ops_snapshot,
             ops_conversation_diagnostics,
             start_legacy_services,
@@ -370,6 +409,12 @@ fn main() {
                             let mut children = state.children.lock().await;
                             children.stop();
                             drop(children);
+                            // Stops the sandbox only if Atlas started it.
+                            let sandbox_handle = handle.state::<Arc<sandbox::Sandbox>>().inner().clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                sandbox::stop_at_exit(&sandbox_handle, &f_data("logs").join("sandbox.log"));
+                            })
+                            .await;
                             state.shutdown_complete.store(true, Ordering::Release);
                             drop(state);
                             handle.exit(0);
@@ -382,6 +427,10 @@ fn main() {
                     if let Ok(mut children) = app.state::<RuntimeState>().children.try_lock() {
                         children.stop();
                     }
+                    sandbox::stop_at_exit(
+                        app.state::<Arc<sandbox::Sandbox>>().inner(),
+                        &f_data("logs").join("sandbox.log"),
+                    );
                 }
                 _ => {}
             }

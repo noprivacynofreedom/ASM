@@ -4,6 +4,9 @@ Run by build-release.ps1 with the bundled interpreter, before anything is built.
 Added 2026-11-09: server.py imported mcp_audit, which was never copied into
 resources/atlas. It only worked while an old dev server held port 8090.
 Exit code 0 = fine, 1 = the build must stop.
+
+With a folder argument (compile_core.py passes its staging copy), only step 2 runs on that folder.
+Step 1 must not run there: it reads *.py names, so it would copy readable root copies over the compiled core.
 """
 import ast
 import os
@@ -33,14 +36,15 @@ def imported(path):
             yield node.module.split(".")[0]
 
 
-def main():
+def main(argv=sys.argv):
     problems = []
+    bundle = pathlib.Path(argv[1]).resolve() if len(argv) > 1 else BUNDLE
 
     # 1. Every project module the bundle imports must be in the bundle: copy in
     #    any that are missing, repeating because a copied file can import more.
     #    Sees imports inside functions too, which step 2 cannot reach.
     project = local_modules(ROOT)
-    while True:
+    while bundle == BUNDLE:
         have = local_modules(BUNDLE) | {p.name for p in BUNDLE.iterdir() if p.is_dir()}
         missing = set()
         for path in list(BUNDLE.glob("*.py")) + list((BUNDLE / "agents").glob("*.py")):
@@ -58,11 +62,11 @@ def main():
     # 2. Really import the server, with the interpreter that ships. Data goes
     #    to a throwaway folder so the check cannot touch real chats.
     with tempfile.TemporaryDirectory(prefix="atlas-bundle-check-") as tmp:
-        env = dict(os.environ, ATLAS_RUNTIME_ROOT=str(BUNDLE), ATLAS_DATA_DIR=tmp,
+        env = dict(os.environ, ATLAS_RUNTIME_ROOT=str(bundle), ATLAS_DATA_DIR=tmp,
                    ATLAS_OBSERVABILITY_DB=str(pathlib.Path(tmp) / "observability.sqlite3"),
                    PYTHONDONTWRITEBYTECODE="1")
         run = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, '.'); import server"],
-                             cwd=BUNDLE, env=env, capture_output=True, text=True, timeout=120)
+                             cwd=bundle, env=env, capture_output=True, text=True, timeout=120)
         if run.returncode != 0:
             problems.append("importing server.py failed:\n" + run.stderr.strip()[-1500:])
 

@@ -74,6 +74,8 @@ pub struct NodeManager {
     active_container_id: Mutex<Option<String>>,
     active_cidfile: Mutex<Option<PathBuf>>,
     hardware: Mutex<HardwareSnapshot>,
+    // One long-lived System: sysinfo needs two samples to compute CPU load.
+    sys: Mutex<System>,
     shutting_down: AtomicBool,
 }
 #[derive(Clone, Serialize)]
@@ -140,6 +142,11 @@ impl NodeManager {
             active_container_id: Mutex::new(None),
             active_cidfile: Mutex::new(None),
             hardware: Mutex::new(HardwareSnapshot::default()),
+            sys: Mutex::new(System::new_with_specifics(
+                RefreshKind::nothing()
+                    .with_cpu(CpuRefreshKind::everything())
+                    .with_memory(MemoryRefreshKind::everything()),
+            )),
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -238,15 +245,19 @@ impl NodeManager {
     }
     pub fn status(&self) -> Result<NodeStatus, String> {
         let cfg = self.cfg()?;
-        let mut sys = System::new_with_specifics(
-            RefreshKind::nothing()
-                .with_cpu(CpuRefreshKind::everything())
-                .with_memory(MemoryRefreshKind::everything()),
-        );
-        sys.refresh_cpu_all();
-        sys.refresh_memory();
-        let total = sys.total_memory() / 1024 / 1024;
-        let avail = sys.available_memory() / 1024 / 1024;
+        let (cpu_percent, total, avail) = {
+            let mut sys = self
+                .sys
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            sys.refresh_cpu_all();
+            sys.refresh_memory();
+            (
+                sys.global_cpu_usage(),
+                sys.total_memory() / 1024 / 1024,
+                sys.available_memory() / 1024 / 1024,
+            )
+        };
         let ledger = fs::read_to_string(self.ledger_path())
             .unwrap_or_default()
             .lines()
@@ -259,7 +270,7 @@ impl NodeManager {
             enabled: cfg.enabled,
             registered: !cfg.node_token.is_empty(),
             remote_workloads_allowed: cfg.enabled && cfg.allow_remote_workloads,
-            cpu_percent: sys.global_cpu_usage(),
+            cpu_percent,
             memory_total_mb: total,
             memory_available_mb: avail,
             gpus: hardware.gpus,

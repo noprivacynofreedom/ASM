@@ -21,7 +21,7 @@ _DEFAULTS: dict[str, Any] = {
     "llama_swap_exe": "",
     "llama_swap_config": "",
     "llm_model": "coder",
-    "llm_timeout": 180,
+    "llm_timeout": 600,
     "llm_temperature": 0.7,
     "llm_max_tokens": 2048,
     "workspace_dir": "workspace",
@@ -43,7 +43,7 @@ def load_settings(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     # Validate the connection values instead of silently accepting bad strings.
     settings["upstream_host"] = str(settings.get("upstream_host") or "127.0.0.1")
     settings["upstream_port"] = int(settings.get("upstream_port", 8080))
-    settings["llm_timeout"] = max(1, int(settings.get("llm_timeout", 180)))
+    settings["llm_timeout"] = max(1, int(settings.get("llm_timeout", 600)))
     settings["llm_max_tokens"] = max(1, int(settings.get("llm_max_tokens", 2048)))
     settings["llm_temperature"] = float(settings.get("llm_temperature", 0.7))
     return settings

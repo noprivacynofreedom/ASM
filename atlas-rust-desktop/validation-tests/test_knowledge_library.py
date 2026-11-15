@@ -14,7 +14,7 @@ class _MCPStub:
     def status(self): return {'configured': 0, 'online': 0, 'servers': []}
     def check_all(self): return self.status()
     def call_tool(self, *_args, **_kwargs): return {'status': 'FAILED', 'verification': 'failed'}
-sys.modules.setdefault('mcp_monitor', types.SimpleNamespace(MCPMonitor=_MCPStub))
+sys.modules.setdefault('mcp_monitor', types.SimpleNamespace(MCPMonitor=_MCPStub, build_mcp_specs=lambda *_a, **_k: []))
 
 import server
 

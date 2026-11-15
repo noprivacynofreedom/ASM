@@ -1,0 +1,37 @@
+# Private core. Glob patterns, relative to the repo root ("*" also matches "/").
+# export_public.py never copies these to the public ASM repo, and deletes them there.
+# compile_core.py compiles the .py files among them that ship in the installer
+# (under atlas-rust-desktop/src-tauri/resources/atlas/) with Nuitka and removes the source.
+
+# Swarm orchestration that ships in the installer
+atlas-rust-desktop/src-tauri/resources/atlas/agents/*
+atlas-rust-desktop/src-tauri/resources/atlas/swarm_run.py
+atlas-rust-desktop/src-tauri/resources/atlas/swarm_pipeline.py
+atlas-rust-desktop/src-tauri/resources/atlas/atlas_orchestrator.py
+atlas-rust-desktop/src-tauri/resources/atlas/dev_cycle.py
+atlas-rust-desktop/src-tauri/resources/atlas/repo_context.py
+atlas-rust-desktop/src-tauri/resources/atlas/context_engine.py
+atlas-rust-desktop/src-tauri/resources/atlas/compute_peers.py
+atlas-rust-desktop/src-tauri/resources/atlas/src/dev_engine/*
+atlas-rust-desktop/src-tauri/resources/atlas/.atlas/*
+
+# Old copies at the repo root, and tests that show how the core works
+agents/*
+swarm_run.py
+swarm_pipeline.py
+atlas_orchestrator.py
+dev_cycle.py
+repo_context.py
+context_engine.py
+compute_peers.py
+atlas-rust-desktop/validation-tests/test_swarm*
+atlas-rust-desktop/validation-tests/test_dev_cycle*
+atlas-rust-desktop/validation-tests/test_compute_peers*
+atlas-rust-desktop/validation-tests/test_context_engine*
+atlas-rust-desktop/validation-tests/test_repo_context*
+tests/test_atlas_coding_swarm*
+tests/test_dev_cycle.py
+validation-tests/test_swarm*
+validation-tests/test_dev_cycle*
+validation-tests/test_context_engine*
+validation-tests/test_compute_peers*

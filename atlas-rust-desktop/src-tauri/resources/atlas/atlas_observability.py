@@ -278,6 +278,11 @@ def finish_task(agent_id,token,task_id,payload):
         if not row or row['assigned_agent']!=agent_id or row['status']!="claimed": return False
         c.execute("UPDATE tasks SET status=?,result=?,error=?,updated_at=?,lease_until=NULL WHERE task_id=?",(status,result,str(payload.get("error") or "")[:2000] or None,now,task_id))
         _event(c,agent_id,task_id,"info" if status=="completed" else "error","task."+status,"Agent reported task result",{"status":status},row['trace_id'],conversation_id=row['conversation_id'],bot_id=row['bot_id'])
+        # A swarm chat stops polling once its task is final. The closing line must exist by then,
+        # so it is written in this same transaction (never after it).
+        log=payload.get("log")
+        if isinstance(log,dict) and str(log.get("kind") or "").startswith("swarm.") and log.get("message"):
+            _event(c,agent_id,task_id,"error" if status=="failed" else "info",str(log["kind"])[:60],str(log["message"])[:2000],None,row['trace_id'],conversation_id=row['conversation_id'],bot_id=row['bot_id'])
     return True
 
 def cancel_all_tasks(reason="Stopped by /swarm stop"):
@@ -301,14 +306,102 @@ def swarm_log(conversation_id, after=0):
     if not conversation_id: return {'lines': [], 'next': 0, 'done': True}
     after = max(0, int(after))
     with LOCK, _db() as c:
-        rows = c.execute("SELECT seq,ts,kind,level,message FROM events WHERE conversation_id=? AND seq>? AND kind LIKE 'swarm.%' ORDER BY seq ASC LIMIT 200", (conversation_id, after)).fetchall()
-        task = c.execute("SELECT status FROM tasks WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1", (conversation_id,)).fetchone()
+        rows = c.execute("SELECT seq,ts,kind,level,message FROM events WHERE conversation_id=? AND seq>? AND kind LIKE 'swarm.%' AND kind!='swarm.phase' ORDER BY seq ASC LIMIT 200", (conversation_id, after)).fetchall()
+        ph = c.execute("SELECT message FROM events WHERE conversation_id=? AND kind='swarm.phase' ORDER BY seq DESC LIMIT 1", (conversation_id,)).fetchone()
+        task = c.execute("SELECT status,error FROM tasks WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1", (conversation_id,)).fetchone()
     lines = [dict(r) for r in rows]
     return {'lines': lines, 'next': lines[-1]['seq'] if lines else after,
-            'done': (task is None) or task['status'] in ('completed', 'failed', 'cancelled')}
+            'done': (task is None) or task['status'] in ('completed', 'failed', 'cancelled'),
+            'status': task['status'] if task else 'unknown',
+            'phase': ph['message'] if ph else '',
+            'error': (task['error'] or '') if task else ''}
+
+def swarm_result(conversation_id):
+    """The saved result of one finished swarm task (the pipeline's plan, result, tests and review). No keys are stored in it."""
+    conversation_id = str(conversation_id or '').strip()[:128]
+    if not conversation_id: return {'ok': False, 'error': 'conversation_id is required'}
+    with LOCK, _db() as c:
+        row = c.execute("SELECT status,result FROM tasks WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1", (conversation_id,)).fetchone()
+    if not row: return {'ok': False, 'error': 'not found'}
+    try: result = json.loads(row['result']) if row['result'] else None
+    except ValueError: result = None
+    return {'ok': True, 'status': row['status'], 'result': result}
 
 def task_snapshot(limit=100):
     with LOCK,_db() as c:
         rows=c.execute("SELECT task_id,created_at,updated_at,status,priority,task_type,assigned_agent,attempts,error,trace_id,conversation_id,bot_id FROM tasks ORDER BY created_at DESC LIMIT ?",(max(1,min(500,int(limit))),)).fetchall()
         counts={r['status']:r['n'] for r in c.execute("SELECT status,COUNT(*) n FROM tasks GROUP BY status").fetchall()}
         return {"tasks":[dict(r) for r in rows],"counts":counts}
+
+# ---------- Bot Logs page (llama-swap sidebar, served by hw_proxy) ----------
+_RUN_CATEGORIES = (  # first match wins; the archive groups finished runs by these
+    ("code", ("code", "script", "python", "rust", "bug", "fix", "function", "api", "test", "build", "compile", ".py", ".rs", "app")),
+    ("research", ("research", "find", "compare", "explain", "summar", "analy", "review", "why", "how ")),
+    ("writing", ("write", "draft", "email", "post", "article", "copy", "story", "letter", "doc")),
+    ("data", ("data", "csv", "sql", "table", "chart", "excel", "json", "parse")),
+    ("design", ("design", "ui", "css", "layout", "logo", "color", "page", "html")),
+)
+
+def _run_category(goal):
+    g = " " + (goal or "").lower() + " "
+    for name, words in _RUN_CATEGORIES:
+        if any(w in g for w in words): return name
+    return "other"
+
+def _bot_state(row, now):
+    s = row["status"]
+    if s == "claimed":
+        return "stalled" if row["lease_until"] and row["lease_until"] < now else "running"
+    if s == "completed": return "done"
+    if s == "failed":
+        return "timeout" if "time" in (row["error"] or "").lower() and "out" in (row["error"] or "").lower() else "failed"
+    return s if s in ("queued", "cancelled") else "queued"
+
+def _run_state(states):
+    for s in ("running", "stalled", "queued", "timeout", "failed"):
+        if s in states: return s
+    return "cancelled" if states and all(s == "cancelled" for s in states) else "done"
+
+def bot_runs(limit=40, lines=40):
+    """Swarm runs, newest first. One entry per run: the goal, the lead, one chat per bot, each with a state
+    (queued, running, stalled, done, failed, timeout, cancelled) and its last plain-language log lines.
+    Finished runs (every task done) carry archived=True and a category for the archive view."""
+    now = time.time()
+    limit = max(1, min(200, int(limit))); lines = max(1, min(200, int(lines)))
+    with LOCK, _db() as c:
+        rows = c.execute("SELECT task_id,created_at,updated_at,status,payload,conversation_id,bot_id,attempts,error,lease_until "
+                         "FROM tasks WHERE conversation_id LIKE 'sw%' ORDER BY created_at DESC LIMIT ?", (limit * 12,)).fetchall()
+        runs, order = {}, []
+        for r in rows:
+            conv = r["conversation_id"] or ""
+            run_id = conv.rsplit("-", 1)[0] if "-" in conv else conv
+            if run_id not in runs:
+                if len(order) >= limit: continue
+                runs[run_id] = {"run_id": run_id, "goal": "", "chats": [], "lead": None}
+                order.append(run_id)
+            try: payload = json.loads(r["payload"] or "{}")
+            except ValueError: payload = {}
+            log = c.execute("SELECT seq,ts,level,message FROM events WHERE conversation_id=? AND kind LIKE 'swarm.%' AND kind!='swarm.phase' "
+                            "ORDER BY seq DESC LIMIT ?", (conv, lines)).fetchall()
+            ph = c.execute("SELECT message FROM events WHERE conversation_id=? AND kind='swarm.phase' ORDER BY seq DESC LIMIT 1", (conv,)).fetchone()
+            end = now if r["status"] in ("queued", "claimed") else r["updated_at"]
+            chat = {"conversation_id": conv, "bot": r["bot_id"] or "bot", "task": str(payload.get("task") or "")[:300],
+                    "state": _bot_state(r, now), "status": r["status"], "started": r["created_at"], "updated": r["updated_at"],
+                    "seconds": round(max(0.0, end - r["created_at"]), 1), "attempts": r["attempts"], "error": (r["error"] or "")[:500],
+                    "phase": ph["message"] if ph else "", "lines": [dict(x) for x in reversed(log)]}
+            run = runs[run_id]
+            run["goal"] = run["goal"] or str(payload.get("goal") or "")[:300]
+            if r["bot_id"] == "Swarm Lead" and run["lead"] is None: run["lead"] = chat
+            else: run["chats"].append(chat)
+    out = []
+    for run_id in order:
+        run = runs[run_id]
+        run["chats"].sort(key=lambda x: x["conversation_id"])
+        every = run["chats"] + ([run["lead"]] if run["lead"] else [])
+        run["state"] = _run_state([x["state"] for x in every])
+        run["started"] = min(x["started"] for x in every)
+        run["updated"] = max(x["updated"] for x in every)
+        run["archived"] = run["state"] == "done"
+        run["category"] = _run_category(run["goal"])
+        out.append(run)
+    return {"runs": out, "now": now}

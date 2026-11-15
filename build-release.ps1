@@ -215,6 +215,17 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled backend check failed. Nothing was built or changed."
     }
+    # The private core ships compiled (Nuitka .pyd), not as readable .py. compile_core.py makes
+    # src-tauri\core-staging\atlas and tauri.core.conf.json, which points Tauri at that copy.
+    Write-Host "`n===== COMPILE PRIVATE CORE (Nuitka) =====" -ForegroundColor Cyan
+    & $BundledPython (Join-Path $Root "compile_core.py")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Core compile failed. Nothing was built or changed."
+    }
+    $CoreConfig = Join-Path $Tauri "core-staging\tauri.core.conf.json"
+    if (!(Test-Path -LiteralPath $CoreConfig -PathType Leaf)) {
+        throw "Core compile did not write $CoreConfig. Nothing was built or changed."
+    }
 
     New-Item -ItemType Directory -Path $Audit -Force | Out-Null
 
@@ -277,8 +288,14 @@ try {
     Write-Host "`n===== RELEASE BUILD =====" -ForegroundColor Cyan
     Write-Host "Cargo target: $env:CARGO_TARGET_DIR"
 
+    # Tauri copies resources into release\atlas but never deletes old files there. Start it empty,
+    # so the readable-core check after the build sees only this build's files.
+    $ReleaseResources = Join-Path $Release "atlas"
+    if (Test-Path -LiteralPath $ReleaseResources) {
+        Remove-Item -LiteralPath $ReleaseResources -Recurse -Force
+    }
     $BuildStarted = $true
-    & npm run tauri -- build --bundles nsis
+    & npm run tauri -- build --bundles nsis --config $CoreConfig
     $BuildExit = $LASTEXITCODE
 
     if ($BuildExit -ne 0) {
@@ -298,6 +315,11 @@ try {
 
     if ($Installers.Count -eq 0) {
         throw "No NSIS installer was generated."
+    }
+
+    & $BundledPython (Join-Path $Root "compile_core.py") --check $ReleaseResources
+    if ($LASTEXITCODE -ne 0) {
+        throw "The build output holds readable core .py files (listed above). Do not ship this installer."
     }
 
     $ExeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash

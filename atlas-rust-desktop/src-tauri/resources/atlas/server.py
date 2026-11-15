@@ -29,6 +29,8 @@ import atlas_observability as OPS
 import swarm_run
 import compute_peers
 import compute_page
+import vision_probe
+import context_engine
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("ATLAS_DATA_DIR", HERE)
@@ -394,11 +396,18 @@ def _library_item_path(item_id):
 def _library_read_source(item_id):
     with open(_library_item_path(item_id), "r", encoding="utf-8") as f: return f.read()
 
+_RECORDS_CACHE = {}
+
 def _library_index_records(force=False):
     index=_library_index(); path=LIBRARY_INDEX_FILE
     if not force:
         try:
-            with open(path,"r",encoding="utf-8") as f: cached=json.load(f)
+            stamp=os.stat(path); key=(stamp.st_mtime_ns,stamp.st_size)
+            hit=_RECORDS_CACHE.get(path)
+            if hit and hit[0]==key: cached=hit[1]
+            else:
+                with open(path,"r",encoding="utf-8") as f: cached=json.load(f)
+                _RECORDS_CACHE[path]=(key,cached)
             if cached.get("version")==2 and cached.get("source_count")==len(index.get("items",[])) and cached.get("distill_count")==len(index.get("distillations",[])) and cached.get("embedding_model","")==str(SETTINGS.get("embedding_model") or "").strip():
                 return cached.get("records",[]), cached.get("mode","lexical")
         except (OSError,ValueError,TypeError): pass
@@ -692,6 +701,81 @@ def _append_system_text(messages, text):
         messages.insert(0, {"role": "system", "content": text})
 
 
+def _upstream_headers(host=None, port=None):
+    return compute_peers.headers_for(host or UPSTREAM_HOST, port or UPSTREAM_PORT, {"Content-Type": "application/json"})
+
+
+def _known_window(model):
+    """n_ctx from the cache only (never blocks a chat). 0 when not known yet."""
+    hit = context_engine._props_cache.get((UPSTREAM_HOST, int(UPSTREAM_PORT), str(model)))
+    return hit[0] if hit else 0
+
+
+def _inject_context(request, messages, atlas_context=None):
+    """Add saved memory and relevant library passages to the system prompt. Returns what was added (for the UI)."""
+    info = {"memory_count": 0, "memory_tokens": 0, "knowledge_count": 0, "knowledge_tokens": 0, "knowledge_titles": []}
+    flags = request.pop("atlas_context_flags", None)
+    flags = flags if isinstance(flags, dict) else {}
+    query = context_engine.retrieval_query(messages)
+    added = []
+    if flags.get("memory", True) is not False:
+        try:
+            text, kept = context_engine.memory_block(context_engine.load_memory(DATA_DIR), query,
+                                                     int(SETTINGS.get("memory_context_tokens", 1500)))
+        except Exception:
+            text, kept = "", []
+        if text:
+            added.append(text)
+            info["memory_count"] = len(kept); info["memory_tokens"] = context_engine.estimate_tokens(text)
+    if query.strip() and flags.get("knowledge", True) is not False:
+        try:
+            hits, mode = _library_retrieve(query, max(8, int(SETTINGS.get("knowledge_context_results", 5)) * 2))
+            window = _known_window(request.get("model")) or int(SETTINGS.get("default_context_window", 16384))
+            budget = min(int(SETTINGS.get("knowledge_context_tokens", 3000)), max(400, window // 5))
+            kept = context_engine.select_hits(hits, budget)[: max(1, int(SETTINGS.get("knowledge_context_results", 5)))]
+            text = context_engine.knowledge_block(kept)
+            if text:
+                added.append(text)
+                info.update(knowledge_count=len(kept), knowledge_tokens=context_engine.estimate_tokens(text),
+                            knowledge_mode=mode, knowledge_titles=sorted({str(h.get("title", ""))[:80] for h in kept}))
+        except Exception:
+            pass  # retrieval is additive; a broken optional index must never block ordinary chat
+    if added:
+        for text in added:
+            _append_system_text(messages, text)
+        from mcp_chat import normalize_system_messages
+        request["messages"] = normalize_system_messages(messages)
+    return info
+
+
+def _prepare_upstream_chat(body, ctx_info, host, port):
+    """Ask for real usage numbers in the stream and count the exact prompt when the model is already loaded."""
+    try:
+        req = json.loads(body)
+    except (ValueError, TypeError):
+        return body, ctx_info
+    if not isinstance(req, dict):
+        return body, ctx_info
+    req.pop("atlas_context_flags", None)
+    if req.get("stream"):
+        opts = req.get("stream_options") if isinstance(req.get("stream_options"), dict) else {}
+        req["stream_options"] = {**opts, "include_usage": True}
+    if SETTINGS.get("exact_token_count", True) is not False and isinstance(req.get("messages"), list):
+        try:
+            exact = context_engine.exact_prompt_tokens(host, port, req.get("model"), req["messages"], _upstream_headers(host, port))
+        except Exception:
+            exact = None
+        if exact:
+            ctx_info = {**ctx_info, "prompt_tokens_exact": exact}
+    if isinstance(req.get("messages"), list):
+        ctx_info = {**ctx_info, "prompt_chars": sum(len(context_engine._text_of(m.get("content")))
+                                                    for m in req["messages"] if isinstance(m, dict))}
+    window = _known_window(req.get("model"))
+    if window:
+        ctx_info = {**ctx_info, "n_ctx": window}
+    return json.dumps(req).encode("utf-8"), ctx_info
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -752,10 +836,18 @@ class Handler(BaseHTTPRequestHandler):
 
         # Format response
         subtasks = subtasks[:5]  # Cap at 5 subtasks
-        run = swarm_run.start(goal, subtasks)
+        pipeline = swarm_run.pipeline_wanted()
+        # Answers are also saved as files: in the Workspace folder when one is set, else in the data folder (outside the install).
+        out_dir = os.path.join(workspace_root() or DATA_DIR, "swarm-output")
+        # The bots read the Workspace folder (read-only). "" = no Workspace set: the bot chats say how to set one.
+        run = swarm_run.start(goal, subtasks, pipeline=pipeline, out_dir=out_dir, repo_root=workspace_root())
         response_text = f"**SWARM STARTED: {goal}**\n\nThese bots are working:\n\n"
         for i, st in enumerate(subtasks, 1):
             response_text += f"{i}. **{st['agent']}**: {st['task']}\n"
+        if pipeline:
+            response_text += ("\nCloud pipeline is ON. Gemini plans and gives each bot one portion. The bots work on the local model. "
+                              "Gemini combines the answers. Tests run on any code. DeepSeek reviews. The task text leaves this PC for those cloud steps. "
+                              "Open the **Swarm Lead** chat to follow it. The final result posts here when all steps are done.\n")
         response_text += ("\nEach bot has its own chat. Pick a bot (for example 10x: SDE) and open its newest chat, named Swarm. It shows, in plain words, what that bot is doing right now."
                           "\nThe bots take turns, because one model runs at a time. Type `/swarm stop` to cancel everything.")
         return self._send_swarm_text(run["run_id"], response_text, run)
@@ -893,6 +985,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("X-Atlas-Machine", machine)
                 if sources:
                     self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(x) for x in sources]))
+                ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
+                usage = completion.get("usage") if isinstance(completion, dict) else None
+                if isinstance(usage, dict) and usage.get("prompt_tokens"):
+                    ctx_info["prompt_tokens_exact"] = int(usage["prompt_tokens"])
+                self.send_header("X-Atlas-Context", json.dumps(ctx_info))
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
@@ -926,6 +1023,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
     def _proxy(self, method):
+        self._atlas_ctx = {}
         body = self._body() or None
         sources = []
         atlas_context = {}
@@ -959,15 +1057,8 @@ class Handler(BaseHTTPRequestHandler):
                     if goal:
                         swarm_response=self._handle_swarm_command(goal, messages)
                         if swarm_response: return swarm_response
-                if latest.strip():
-                    hits, knowledge_mode=_library_retrieve(latest, int(SETTINGS.get("knowledge_context_results",5)))
-                    if hits:
-                        context="ATLAS RETRIEVED KNOWLEDGE (source-attributed; use only when relevant; distinguish source facts from inference):\n"
-                        context += "\n\n".join(f"[{h.get('kind')} · {h.get('title')} · source_id={h.get('source_id','')} · distillation_id={h.get('distillation_id','')} · score {h.get('score')} ]\n{h.get('text','')}" for h in hits)
-                        _append_system_text(messages, context)
-                        from mcp_chat import normalize_system_messages
-                        request["messages"]=normalize_system_messages(messages)
-                        body=json.dumps(request).encode("utf-8")
+                self._atlas_ctx = _inject_context(request, messages, atlas_context)
+                body=json.dumps(request).encode("utf-8")
             except Exception:
                 # Retrieval is additive; a broken optional index must never block ordinary chat.
                 pass
@@ -996,6 +1087,9 @@ class Handler(BaseHTTPRequestHandler):
                     target_host, target_port, machine = peer_host, peer_port, peer["name"]
             except (ValueError, TypeError):
                 pass
+        ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
+        if body and method == "POST" and self.path.startswith("/v1/chat/completions"):
+            body, ctx_info = _prepare_upstream_chat(body, ctx_info, target_host, target_port)
         try:
             conn = http.client.HTTPConnection(target_host, target_port, timeout=900)
             conn.request(method, self.path, body=body,
@@ -1016,6 +1110,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         if sources:  # file names the UI shows under the answer
             self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(s) for s in sources]))
+        if ctx_info:
+            self.send_header("X-Atlas-Context", json.dumps(ctx_info))
         self.end_headers()
         try:
             while True:
@@ -1037,6 +1133,20 @@ class Handler(BaseHTTPRequestHandler):
                     {'request_id': request_id, 'queue_job_id': atlas_context.get('queue_job_id'), 'http_status': resp.status}, level, request_id)
 
     def do_GET(self):
+        if self.path.startswith("/api/context/window"):
+            model = (parse_qs(urlparse(self.path).query).get("model") or [""])[0]
+            if not model:
+                return self._send(400, json.dumps({"ok": False, "error": "model is required"}))
+            n_ctx = context_engine.context_window(UPSTREAM_HOST, UPSTREAM_PORT, model, headers=_upstream_headers())
+            return self._send(200, json.dumps({"ok": True, "model": model, "n_ctx": n_ctx}))
+        if self.path == "/api/memory":
+            return self._send(200, json.dumps({"ok": True, **context_engine.load_memory(DATA_DIR)}, ensure_ascii=False))
+        if self.path.startswith("/api/vision"):
+            model = (parse_qs(urlparse(self.path).query).get("model") or [""])[0]
+            if not model:
+                return self._send(400, json.dumps({"ok": False, "error": "model is required"}))
+            return self._send(200, json.dumps({"ok": True, "model": model,
+                                               "vision": vision_probe.probe_vision(UPSTREAM_HOST, UPSTREAM_PORT, model)}))
         # Atlas Swarm observability: real registered agents and persisted events.
         if self.path == "/api/ops/agents":
             return self._send(200, json.dumps(OPS.snapshot(), ensure_ascii=False))
@@ -1103,6 +1213,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(OPS.swarm_log((q.get("conversation_id") or [""])[0], (q.get("after") or ["0"])[0]), ensure_ascii=False))
             except ValueError as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if urlparse(self.path).path == "/api/ops/swarm/runs":
+            # Backend truth for the swarm state bar, the activity line and the llama-swap Bot Logs page.
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                return self._send(200, json.dumps(OPS.bot_runs((q.get("limit") or ["40"])[0], (q.get("lines") or ["40"])[0]), ensure_ascii=False))
+            except ValueError as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if urlparse(self.path).path == "/api/ops/swarm/result":
+            q = parse_qs(urlparse(self.path).query)
+            return self._send(200, json.dumps(OPS.swarm_result((q.get("conversation_id") or [""])[0]), ensure_ascii=False))
         if self.path == "/api/ops/tasks":
             return self._send(200, json.dumps(OPS.task_snapshot(), ensure_ascii=False))
         if self.path.startswith("/api/ops/tasks/") and self.path.endswith("/evidence"):
@@ -1338,6 +1458,31 @@ class Handler(BaseHTTPRequestHandler):
     def _do_post(self):
         if self._compute_post():
             return
+        if self.path == "/api/memory":
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                data = context_engine.memory_action(DATA_DIR, payload)
+                return self._send(200, json.dumps({"ok": True, **data}, ensure_ascii=False))
+            except (ValueError, TypeError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path == "/api/context/compact":
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict) or not payload.get("model") or not isinstance(payload.get("messages"), list):
+                    raise ValueError("model and messages are required")
+                host, port, _peer = compute_peers.route(payload["model"])
+                host, port = host or UPSTREAM_HOST, port or UPSTREAM_PORT
+                summary, usage = context_engine.compact(host, port, payload["model"], str(payload.get("summary") or ""),
+                                                        payload["messages"], int(payload.get("words") or 400),
+                                                        _upstream_headers(host, port),
+                                                        max_chars=max(4000, min(400000, int(payload.get("max_chars") or 60000))))
+                return self._send(200, json.dumps({"ok": True, "summary": summary, "usage": usage}, ensure_ascii=False))
+            except ValueError as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+            except Exception as exc:
+                return self._send(502, json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
         # Agents receive a per-registration bearer token; subsequent writes require it.
         if self.path == "/api/ops/agents/register":
             try:

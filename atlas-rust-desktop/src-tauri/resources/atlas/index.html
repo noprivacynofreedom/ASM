@@ -65,6 +65,13 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 .bot header .dot{width:8px;height:8px}.bot .bot-avatar{width:30px;height:30px;flex:0 0 30px;border:1px solid var(--line);object-fit:cover;background:#17131f;border-radius:50%}.bot .bot-avatar-fallback{display:grid;place-items:center;color:var(--bot-color,var(--accent));font:700 12px var(--mono)}
 .bot header .ttl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{font:11px var(--mono);border:1px solid var(--line);padding:1px 6px;color:var(--muted)}
+.tabs{display:flex;gap:4px;padding:6px 12px}
+.tab{flex:1;text-align:center}
+.tab[aria-selected="true"]{border-color:var(--accent2);color:var(--accent2)}
+#swarmBar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 16px;border-bottom:1px solid var(--line);font:11px var(--mono)}
+#swarmBar[hidden]{display:none}
+#swarmBar .st{padding:1px 6px;border:1px solid var(--line);color:var(--muted)}
+#swarmBar .st.done{border-color:var(--ok);color:var(--ok)} #swarmBar .st.now{border-color:var(--warn);color:var(--warn)} #swarmBar .st.bad{border-color:var(--bad);color:var(--bad)}
 .badge.ok{border-color:var(--ok);color:var(--ok)} .badge.busy{border-color:var(--warn);color:var(--warn)} .badge.err{border-color:var(--bad);color:var(--bad)}
 .bot .meta{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:6px 10px 2px;font:11px var(--mono);color:var(--muted)}
 .bot .meta b{color:var(--text);font-weight:400}
@@ -75,6 +82,23 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 #chats button.open{flex:1;text-align:left;background:none;border:0;padding:6px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
 #chats button.del{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px 8px}
 #chats button.del:hover{color:var(--bad)}
+/* SWARM tab: one folder per run. Chip = role, coloured by state. Then the goal text, cut with an ellipsis. */
+.chip{flex:none;display:inline-flex;align-items:center;gap:4px;font:11px var(--mono);border:1px solid var(--line);padding:1px 6px;color:var(--muted);background:none;white-space:nowrap;line-height:1.5}
+.chip.ok{border-color:var(--ok);color:var(--ok)} .chip.busy{border-color:var(--warn);color:var(--warn)} .chip.err{border-color:var(--bad);color:var(--bad)} .chip.timeout{border-color:#e879f9;color:#e879f9} .chip.stall{border-color:#fb923c;color:#fb923c} .chip.queued{border-color:#60a5fa;color:#60a5fa} .chip.stopped{border-color:var(--muted);color:var(--muted)}
+#chats li.swarm-run button.open,#chats .swarm-steps button.open{display:flex;align-items:center;gap:8px;min-width:0}
+#chats .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#chats .n{flex:none;font:11px var(--mono);color:var(--muted)}
+#chats button.caret{flex:none;width:24px;background:none;border:0;color:var(--muted);cursor:pointer;padding:6px 0 6px 4px;font:12px var(--mono)}
+#chats button.caret:hover{color:var(--accent2)} #chats button.caret:disabled{opacity:.3;cursor:default}
+#chats li.swarm-steps{display:block;border:0}
+#chats li.swarm-steps:hover{border-color:transparent}
+#chats .swarm-steps ul{list-style:none;margin:0 0 4px 12px;padding:0 0 0 10px;border-left:1px solid var(--line)}
+#chats .swarm-steps li{display:flex;border:1px solid transparent}
+#chats .swarm-steps li:hover{border-color:var(--line)} #chats .swarm-steps li.active{border-color:var(--accent)}
+#chats .swarm-steps button.open{font-size:13px;padding:4px 8px}
+#chats li.none{color:var(--muted);font-size:13px;padding:8px;white-space:normal}
+#swarmBar .sep{color:var(--line)}
+#swarmBar button.chip{cursor:pointer} #swarmBar button.chip:hover{background:var(--panel2)}
 .backup{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
 #backupMsg{margin:0;flex-basis:100%;font:11px var(--mono);color:var(--muted);overflow-wrap:anywhere}
 #backupMsg:empty{display:none}
@@ -106,6 +130,7 @@ fieldset label{flex-direction:row!important;align-items:center;gap:6px;font:14px
 .msg.queued .who .queue-tag{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
 .msg.queued .body{white-space:pre-wrap}
 .msg.queued .queue-actions{display:flex;gap:6px;flex-wrap:wrap;padding:0 12px 8px}
+#log .queue-strip,#log .queue-strip *,#log .queue-actions,#log .queue-actions *,#log .queue-tag{-webkit-user-select:none;user-select:none}
 .queue-strip{display:flex;align-items:center;gap:8px;max-width:920px;width:100%;margin:6px auto 0;font:11px var(--mono);letter-spacing:1px;color:var(--muted)}
 .msg .body{padding:10px 14px;overflow-wrap:anywhere}
 .msg .body p{margin:.4em 0}
@@ -204,6 +229,30 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
 .activity-summary{min-width:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.activity-summary strong{color:var(--text)}.activity-summary span{color:var(--muted)}.activity-toggle{justify-self:end}.activity-details{grid-column:1/-1;border-top:1px solid var(--line);padding-top:7px;max-height:150px;overflow:auto;display:grid;gap:4px}.activity-details[hidden]{display:none}.activity-event{display:flex;gap:8px;align-items:baseline;color:var(--muted)}.activity-event time{flex:0 0 auto}.activity-event b{color:var(--text);font-weight:500}.activity-event.empty{margin:0;display:block;text-align:left;font:11px var(--mono)}
 @keyframes activityPulse{50%{box-shadow:0 0 10px #a77bff88;transform:scale(1.04)}}
 @media(prefers-reduced-motion:reduce){.activity-companion[data-state="thinking"] .activity-pet,.activity-companion[data-state="tool"] .activity-pet,.activity-companion[data-state="task"] .activity-pet{animation:none}}
+/* Context engine: memory, compaction, message actions, slash commands, chat search */
+.usage-source{font:10px var(--mono);letter-spacing:1px;border:1px solid var(--line);padding:2px 6px;color:var(--muted)}
+.usage-source.exact,.usage-source.measured{border-color:#3fcf8e;color:#3fcf8e}
+.usage-trigger.warn{border-color:#f5b041;color:#f5b041}.usage-trigger.full{border-color:#e5484d;color:#e5484d}
+.mem-add{display:flex;gap:8px;margin:10px 0}.mem-add input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px}
+.mem-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.mem-list li{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);padding:7px;font:12px var(--mono)}
+.mem-list li span{flex:1;min-width:0;overflow-wrap:anywhere}.mem-list li .btn{padding:2px 7px;font:10px var(--mono)}
+.mem-toggle{display:flex;align-items:center;gap:6px}
+.compact-mark{margin:10px 0;border:1px dashed var(--line);padding:8px 10px;font:11px var(--mono);color:var(--muted)}
+.compact-mark summary{letter-spacing:1px}.compact-mark .think-text{white-space:pre-wrap;margin-top:8px;color:var(--text)}
+.chat-note{margin:8px 0;border-left:2px solid var(--accent);padding:6px 10px;font:12px var(--mono);color:var(--muted);white-space:pre-wrap}
+#log .msg .msg-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+#log .msg .msg-actions .btn{padding:2px 8px;font:10px var(--mono)}
+.msg-edit{width:100%;min-height:80px;resize:vertical;background:var(--panel2);border:1px solid var(--accent);color:var(--text);padding:8px;font:inherit}
+.chat-search{display:block;width:calc(100% - 24px);margin:0 12px 6px;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 8px;font:11px var(--mono)}
+form.send{position:relative}
+.slash-hints{position:absolute;left:16px;right:16px;bottom:100%;background:var(--panel);border:1px solid var(--accent);list-style:none;margin:0;padding:4px;display:grid;gap:2px;z-index:15;max-height:260px;overflow:auto}
+.slash-hints[hidden]{display:none}
+.slash-hints li{display:flex;gap:12px;padding:5px 8px;font:12px var(--mono);cursor:pointer}
+.slash-hints li b{color:var(--text);min-width:110px}.slash-hints li span{color:var(--muted)}
+.slash-hints li[aria-selected="true"]{background:var(--panel2);outline:1px solid var(--accent)}
+@media (prefers-reduced-motion:reduce){.slash-hints,.compact-mark{transition:none}}
+@media(max-width:600px){form.send{flex-wrap:wrap}#input{flex:1 1 100%}}
 @media(max-width:820px){.usage-pop,.plugin-pop,.mcp-pop{right:8px;width:calc(100vw - 16px);max-height:calc(100vh - 64px)}}
 
 #menu{display:none}
@@ -285,7 +334,12 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
     <div class="sec"><span>01 // BOTS</span><span id="swap" class="badge">SWAP ?</span></div>
     <div id="bots" class="scroll" role="list"></div>
     <div class="sec"><span id="chatsTitle">02 // CHATS</span><button class="btn" id="newChat" type="button">+ Chat</button></div>
-    <div style="padding:6px 12px"><button class="btn" id="knowledgeBtn" type="button" style="width:100%;text-align:left">▤ KNOWLEDGE // LIBRARY</button></div>
+    <div class="tabs" role="tablist" aria-label="Chat views">
+      <button class="btn tab" id="tabChats" type="button" role="tab" aria-selected="true">CHATS</button>
+      <button class="btn tab" id="tabSwarm" type="button" role="tab" aria-selected="false">SWARM</button>
+      <button class="btn tab" id="knowledgeBtn" type="button" title="Open the Knowledge library">LIBRARY</button>
+    </div>
+    <label class="sr" for="chatSearch">Search chats</label><input id="chatSearch" class="chat-search" type="search" placeholder="Search chats" autocomplete="off">
     <ul id="chats" class="scroll"></ul>
     <div class="backup" role="group" aria-label="Backup">
       <button class="btn" id="exportBtn" type="button" title="Save a copy of all bots and chats to the exports folder">Export</button>
@@ -301,6 +355,7 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
       <span class="badge ok" id="status" role="status">READY</span>
       <span class="spacer"></span>
       <button class="usage-trigger" id="usageBtn" type="button" aria-expanded="false">CTX // NO REQUEST</button>
+      <button class="usage-trigger" id="memoryBtn" type="button" aria-expanded="false" title="Facts Atlas remembers across chats">MEMORY // --</button>
       <button class="plugin-trigger" id="pluginsBtn" type="button" aria-expanded="false" aria-live="polite">PLUGINS // CHECKING</button>
       <button class="mcp-trigger" id="mcpBtn" type="button" aria-expanded="false" aria-live="polite">MCP // CHECKING</button>
       <label class="small" for="hdrModel">MODEL</label>
@@ -361,6 +416,8 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
     <section id="usagePanel" class="usage-pop" aria-label="Context and usage details">
       <div class="usage-head"><strong>ATLAS // CONTEXT & USAGE</strong><button class="btn" id="usageClose" type="button">CLOSE</button></div>
       <div class="usage-muted" id="ctxSummary">Waiting for first request.</div>
+      <div class="usage-line"><span>COUNT SOURCE</span><span class="usage-source" id="ctxSource">NONE YET</span></div>
+      <div class="usage-bar" aria-hidden="true"><i id="ctxBar" style="width:0%"></i></div>
       <div class="usage-section">
         <div class="usage-line"><b>CONTEXT BREAKDOWN</b><span id="ctxTotal">-- tokens</span></div>
         <div class="usage-breakdown" id="ctxBreakdown"></div>
@@ -382,9 +439,20 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
       <div class="usage-settings">
         <label>SESSION TOKEN BUDGET<input id="sessionBudget" type="number" min="1000" step="1000"></label>
         <label>WEEKLY TOKEN BUDGET<input id="weeklyBudget" type="number" min="1000" step="1000"></label>
-        <button class="btn" id="saveUsageSettings" type="button">SAVE BUDGETS</button>
+        <label>AUTO-COMPACT AT %<input id="autoCompactPct" type="number" min="50" max="98" step="1"></label>
+        <button class="btn" id="saveUsageSettings" type="button">SAVE SETTINGS</button>
+        <button class="btn" id="compactNow" type="button" title="Summarise older messages of this chat now (/compact)">COMPACT NOW</button>
       </div>
+      <div class="usage-muted" style="margin-top:8px">Exact = counted by the model's own tokenizer before send. Measured = the model server's real numbers after the reply. Estimated = characters divided by this model's measured characters-per-token.</div>
     </section>
+    <section id="memoryPanel" class="usage-pop" aria-label="Memory">
+      <div class="usage-head"><strong>ATLAS // MEMORY</strong><span class="spacer"></span><label class="usage-muted mem-toggle"><input type="checkbox" id="memoryEnabled"> USE IN CHATS</label><button class="btn" id="memoryClose" type="button">CLOSE</button></div>
+      <div class="usage-muted">Atlas adds these facts to every chat (most relevant first, about 1,500 tokens at most). In a chat, type <b>/remember</b> a fact or <b>/forget</b> words. Stored on this PC only, in .atlas/memory.json.</div>
+      <form class="mem-add" id="memoryForm"><label class="sr" for="memoryText">New memory</label><input id="memoryText" maxlength="1000" placeholder="e.g. I use Windows 11 and PowerShell"><button class="btn primary" type="submit">ADD</button></form>
+      <div class="usage-muted" id="memoryStatus" role="status"></div>
+      <ul class="mem-list" id="memoryList"></ul>
+    </section>
+    <div id="swarmBar" role="status" aria-live="polite" hidden></div>
     <div id="log" aria-live="polite"></div>
     <section id="opsPanel" style="padding:20px 16px;overflow:auto">
       <div style="max-width:1200px;margin:0 auto">
@@ -403,8 +471,9 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
     </section>
     <div id="files"></div>
     <form class="send" id="form">
+      <ul class="slash-hints" id="slashHints" role="listbox" aria-label="Commands" hidden></ul>
       <label class="sr" for="input">Message</label>
-      <textarea id="input" placeholder="Message. Enter to send, Shift+Enter for a new line."></textarea>
+      <textarea id="input" placeholder="Message. Enter to send, Shift+Enter for a new line. Type / for commands." aria-controls="slashHints" aria-autocomplete="list"></textarea>
       <label class="btn" for="attach" title="Attach images, text or code files">Attach</label>
       <input type="file" id="attach" accept="image/png,image/jpeg,image/webp,.txt,.md,.py,.js,.html,.css,.json,.yaml,.yml,.ps1,.sql,.log,.csv" multiple class="sr">
       <button class="btn" id="wsBtn" type="button" title="Set the working folder and attach files from it">Workspace</button>
@@ -610,31 +679,38 @@ let models = [], status = {}, ctrl = null, pending = [], saveT = null, queueRunn
 
 // Local usage accounting: persisted in this WebView profile, separate from data.json.
 const USAGE_KEY = "atlasLocalUsageV1";
-const USAGE_DEFAULTS = { sessionBudget: 100000, weeklyBudget: 500000, events: [] };
+const USAGE_DEFAULTS = { sessionBudget: 100000, weeklyBudget: 500000, autoCompactPct: 80, ratios: {}, events: [] };
 let usage = (() => { try { return {...USAGE_DEFAULTS, ...JSON.parse(localStorage.getItem(USAGE_KEY)||"{}")}; } catch { return {...USAGE_DEFAULTS}; } })();
 let lastContext = null;
 function saveUsage(){ try { localStorage.setItem(USAGE_KEY, JSON.stringify(usage)); } catch {} }
-function estimateTokens(value){
-  if (Array.isArray(value)) return value.reduce((n,x)=>n+estimateTokens(x),0);
+// Characters per token measured from this model's real prompt counts (falls back to 3.2).
+function tokenRatio(model){ const r=Number((usage.ratios||{})[model]); return r>=1.2&&r<=8?r:3.2; }
+function textChars(value){
+  if (Array.isArray(value)) return value.reduce((n,x)=>n+textChars(x),0);
+  if (value && typeof value === "object") return value.type==="image_url"||value.image_url?0:textChars(value.text ?? value.content ?? "");
+  return /^data:image\//i.test(String(value??""))?0:String(value ?? "").length;
+}
+function estimateTokens(value, ratio=3.2){
+  if (Array.isArray(value)) return value.reduce((n,x)=>n+estimateTokens(x,ratio),0);
   if (value && typeof value === "object") {
     if (value.type === "image_url" || value.type === "input_image") return 2048;
     if (value.image_url || value.image) return 2048;
-    return Object.entries(value).reduce((n,[k,v])=>n+estimateTokens(k)+estimateTokens(v),0);
+    return Object.entries(value).reduce((n,[k,v])=>n+estimateTokens(k,ratio)+estimateTokens(v,ratio),0);
   }
   const text=String(value ?? "");
   // Base64 image payload size is not proportional to model context tokens.
   if (/^data:image\//i.test(text)) return 2048;
-  return Math.ceil(text.length / 3.2);
+  return Math.ceil(text.length / ratio);
 }
-function trimToContext(messages, system, contextLimit, outputReserve){
-  const budget = Math.max(1024, contextLimit - outputReserve - 1200);
+function trimToContext(messages, system, contextLimit, outputReserve, ratio=3.2, serverReserve=1200){
+  const budget = Math.max(1024, contextLimit - outputReserve - serverReserve);
   const kept = messages.slice();
-  const systemTokens = estimateTokens(system) + 8;
-  let count = systemTokens + kept.reduce((n,m)=>n+estimateTokens(m.content)+8,0);
+  const systemTokens = estimateTokens(system, ratio) + 8;
+  let count = systemTokens + kept.reduce((n,m)=>n+estimateTokens(m.content, ratio)+8,0);
   // Drop oldest complete history entries, but always preserve the newest user turn.
   while (count > budget && kept.length > 1) {
     const removed = kept.shift();
-    count -= estimateTokens(removed.content) + 8;
+    count -= estimateTokens(removed.content, ratio) + 8;
   }
   return {messages:kept, estimated:count, budget, dropped:messages.length-kept.length};
 }
@@ -659,16 +735,29 @@ function refreshUsage(){
   $("#weeklyReset").textContent=w.oldest?fmtReset(w.oldest+7*86400000-Date.now()):"no usage yet";
   $("#computeValue").textContent=`${Math.round(w.seconds)} sec observed this week`;
   $("#sessionBudget").value=sb; $("#weeklyBudget").value=wb;
-  const ctx=lastContext;
-  $("#usageBtn").textContent=ctx?`CTX ${ctx.estimated.toLocaleString()} / ${ctx.limit.toLocaleString()} // ${Math.round(100*ctx.estimated/ctx.limit)}%`:"CTX -- // USAGE";
-  $("#ctxSummary").textContent=ctx?`${ctx.model} · estimated prompt ${ctx.estimated.toLocaleString()} tokens · ${ctx.dropped} older messages trimmed before send`:"No request yet. Atlas estimates prompt size locally before each send.";
-  $("#ctxTotal").textContent=ctx?`${ctx.estimated.toLocaleString()} / ${ctx.limit.toLocaleString()}`:"-- tokens";
-  const rows=ctx?[
-    ["System prompt",ctx.system],["Conversation",ctx.conversation],["Attachments / images",ctx.attachments],["Message overhead",ctx.overhead]
-  ]:[];
-  $("#ctxBreakdown").innerHTML=rows.map(([n,v])=>`<span>${n}</span><span>${Number(v).toLocaleString()}</span><span class="muted">${ctx?Math.round(100*v/Math.max(1,ctx.estimated))+"%":""}</span>`).join("");
+  $("#autoCompactPct").value=Number(usage.autoCompactPct)||80;
+  renderContextMeter();
 }
-const infoPanels=[['pluginsPanel','pluginsBtn'],['mcpPanel','mcpBtn'],['usagePanel','usageBtn']];
+const CTX_SOURCE_LABEL={exact:"EXACT // model tokenizer",measured:"MEASURED // model server",estimated:"ESTIMATED"};
+function ctxUsed(ctx){ return ctx ? Math.max(0,Math.round((ctx.estimated||0)+(ctx.output||ctx.live||0))) : 0; }
+function renderContextMeter(){
+  const ctx=lastContext, btn=$("#usageBtn");
+  if(!ctx){ btn.textContent="CTX -- // USAGE"; btn.classList.remove("warn","full"); return; }
+  const used=ctxUsed(ctx), pct=Math.round(100*used/Math.max(1,ctx.limit));
+  btn.textContent=`CTX ${used.toLocaleString()} / ${ctx.limit.toLocaleString()} // ${pct}%${ctx.live?" // LIVE":""}`;
+  btn.classList.toggle("warn",pct>=Number(usage.autoCompactPct||80)&&pct<95); btn.classList.toggle("full",pct>=95);
+  btn.title=`${CTX_SOURCE_LABEL[ctx.source]||"ESTIMATED"} · prompt ${Math.round(ctx.estimated).toLocaleString()} + reply ${Math.round(ctx.output||ctx.live||0).toLocaleString()} tokens`;
+  const panelOpen=$("#usagePanel").classList.contains("open"); if(!panelOpen&&ctx.live)return;
+  $("#ctxBar").style.width=Math.min(100,pct)+"%";
+  $("#ctxSource").textContent=(CTX_SOURCE_LABEL[ctx.source]||"ESTIMATED")+(ctx.source==="estimated"?` // ${tokenRatio(ctx.model).toFixed(2)} chars/token`:"");
+  $("#ctxSource").className="usage-source "+(ctx.source||"estimated");
+  const extra=[ctx.dropped?`${ctx.dropped} older messages trimmed`:"",ctx.compacted?`${ctx.compacted} older messages compacted into a summary`:"",ctx.cached?`${ctx.cached.toLocaleString()} prompt tokens reused from cache`:""].filter(Boolean).join(" · ");
+  $("#ctxSummary").textContent=`${ctx.model} · window ${ctx.limit.toLocaleString()}${ctx.windowSource?` (${ctx.windowSource})`:""} · prompt ${Math.round(ctx.estimated).toLocaleString()} + reply ${Math.round(ctx.output||ctx.live||0).toLocaleString()} tokens${extra?" · "+extra:""}`;
+  $("#ctxTotal").textContent=`${used.toLocaleString()} / ${ctx.limit.toLocaleString()}`;
+  const rows=[["System prompt + skills",ctx.system],["Compacted summary",ctx.summary],["Memory",ctx.memory],["Retrieved knowledge",ctx.knowledge],["Conversation",ctx.conversation],["Attachments / images",ctx.attachments],["Template / Atlas prompt / docs",ctx.other],["Reply",ctx.output||ctx.live]].filter(([,v])=>Number(v)>0);
+  $("#ctxBreakdown").innerHTML=rows.map(([n,v])=>`<span>${n}</span><span>${Math.round(v).toLocaleString()}</span><span class="muted">${Math.round(100*v/Math.max(1,used))}%</span>`).join("")+(ctx.titles&&ctx.titles.length?`<span class="muted" style="grid-column:1/-1">Library: ${esc(ctx.titles.join(", "))}</span>`:"");
+}
+const infoPanels=[['pluginsPanel','pluginsBtn'],['mcpPanel','mcpBtn'],['usagePanel','usageBtn'],['memoryPanel','memoryBtn']];
 function arrangeInfoPanels(active){
   const ordered=active?[...infoPanels.filter(([id])=>id===active),...infoPanels.filter(([id])=>id!==active)]:infoPanels;let top=58;
   for(const [id,trigger] of ordered){const panel=$(`#${id}`),button=$(`#${trigger}`);if(!panel.classList.contains('open'))continue;
@@ -680,6 +769,218 @@ window.addEventListener('resize',()=>arrangeInfoPanels());
 function recordUsage(tokens, seconds){
   const now=Date.now(); usage.events.push({at:now,tokens:Math.max(0,Math.round(tokens||0)),seconds:Math.max(0,Number(seconds)||0)});
   usage.events=usage.events.filter(e=>e.at>now-8*86400000).slice(-10000); saveUsage(); refreshUsage();
+}
+
+
+/* ---------- context engine: real window, real token counts, compaction ---------- */
+const ctxWindows = {}, ctxWindowPending = {};  // model -> n_ctx reported by llama-server
+function fetchModelWindow(model){
+  if (!model) return Promise.resolve(0);
+  if (ctxWindows[model]) return Promise.resolve(ctxWindows[model]);
+  if (!ctxWindowPending[model]) ctxWindowPending[model] = fetch("/api/context/window?model=" + encodeURIComponent(model))
+    .then(r => r.json()).then(d => { if (d && Number(d.n_ctx) > 0) ctxWindows[model] = Number(d.n_ctx); return ctxWindows[model] || 0; })
+    .catch(() => 0).finally(() => { delete ctxWindowPending[model]; });
+  return ctxWindowPending[model];
+}
+// The bot setting can only make the window smaller: the model server's n_ctx is the hard limit.
+function effectiveContextLimit(b){
+  const set = Math.max(2048, Number(b.context_length || 32768)), real = ctxWindows[b.model] || 0;
+  return real ? Math.min(set, real) : set;
+}
+function applyServerContext(ctx, info, b, ratio){
+  if (!info || typeof info !== "object") return;
+  if (Number(info.n_ctx) > 0) { ctxWindows[b.model] = Number(info.n_ctx); ctx.limit = effectiveContextLimit(b); ctx.windowSource = "llama-server n_ctx"; }
+  ctx.memory = Number(info.memory_tokens) || 0; ctx.knowledge = Number(info.knowledge_tokens) || 0;
+  ctx.titles = Array.isArray(info.knowledge_titles) ? info.knowledge_titles.slice(0, 8) : [];
+  // Server-side text is counted with this model's ratio, not the server's generic 3.5.
+  if (Number(info.prompt_chars) > 0 && ratio) { const scale = 3.5 / ratio; ctx.memory = Math.round(ctx.memory * scale); ctx.knowledge = Math.round(ctx.knowledge * scale); }
+  ctx.estimated += ctx.memory + ctx.knowledge;
+  if (Number(info.prompt_tokens_exact) > 0) setCountedPrompt(ctx, Number(info.prompt_tokens_exact) + ctx.attachments, "exact");
+  else if (Number(info.prompt_chars) > 0 && ratio) {
+    const total = Math.ceil(Number(info.prompt_chars) / ratio) + ctx.attachments + ctx.other;
+    ctx.other += Math.max(0, total - ctx.estimated); ctx.estimated = Math.max(ctx.estimated, total);
+  }
+  renderContextMeter();
+}
+// Real prompt total known: keep the parts, put the rest (chat template, Atlas default prompt, docs) in "other".
+function setCountedPrompt(ctx, total, source){
+  const known = (ctx.system||0) + (ctx.summary||0) + (ctx.memory||0) + (ctx.knowledge||0) + (ctx.conversation||0) + (ctx.attachments||0);
+  if (known > total) { const k = total / Math.max(1, known); ["system","summary","memory","knowledge","conversation","attachments"].forEach(x => ctx[x] = Math.round((ctx[x]||0) * k)); ctx.other = 0; }
+  else ctx.other = total - known;
+  ctx.estimated = total; ctx.source = source;
+}
+function finishContextCount(ctx, r){
+  const u = r.realUsage || {}, model = ctx.model;
+  const prompt = Number(u.prompt_tokens) || Number(r.promptTokens) || 0;
+  const output = Number(u.completion_tokens) || Number(r.predictedN) || Number(r.streamed) || 0;
+  if (prompt > 0) {
+    setCountedPrompt(ctx, prompt, ctx.source === "exact" ? "exact" : "measured"); if (ctx.source !== "exact") ctx.source = "measured";
+    // Learn this model's characters per token from text-only prompts (images make the count noisy).
+    const chars = Number(r.ctxInfo && r.ctxInfo.prompt_chars) || 0;
+    if (!r.images && chars > 400) {
+      const seen = chars / Math.max(1, prompt - 4 * 3), old = tokenRatio(model);
+      if (seen >= 1.2 && seen <= 8) { usage.ratios = usage.ratios || {}; usage.ratios[model] = Math.round((usage.ratios[model] ? old * 0.5 + seen * 0.5 : seen) * 1000) / 1000; saveUsage(); }
+    }
+  }
+  ctx.cached = Number(r.cachedTokens) || Number(u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || 0;
+  ctx.output = output; ctx.live = 0;
+  if (lastContext === ctx) refreshUsage();
+  const t = r.totalUsage || {};
+  const billed = (Number(t.prompt_tokens) || 0) + (Number(t.completion_tokens) || 0) || (prompt || ctx.estimated) + output;
+  return { billed, message: { prompt: prompt || Math.round(ctx.estimated), completion: output, cached: ctx.cached, source: prompt ? ctx.source : "estimated", rounds: Number(t.rounds) || 1 } };
+}
+function compactStart(c){ return c && c.compact && c.compact.upto > 0 && c.compact.upto <= c.messages.length ? c.compact.upto : 0; }
+// Like Claude's auto-compact: when the chat passes the threshold, older turns become a summary instead of being dropped.
+async function maybeAutoCompact(c, b){
+  const start = compactStart(c), keep = 4, upto = c.messages.length - keep;
+  if (upto - start < 4) return false;
+  const limit = effectiveContextLimit(b), ratio = tokenRatio(b.model), reserve = Math.max(512, Number(b.max_tokens || 2048));
+  const est = c.messages.slice(start).reduce((n, m) => n + estimateTokens(m.content, ratio) + 8, 0) + estimateTokens(b.system || "", ratio) + (c.compact ? estimateTokens(c.compact.summary, ratio) : 0);
+  if (est + reserve < limit * (Number(usage.autoCompactPct) || 80) / 100) return false;
+  return compactChat(c, b, upto, "auto");
+}
+async function compactChat(c, b, upto, reason){
+  const start = compactStart(c); if (upto <= start) return false;
+  const limit = effectiveContextLimit(b), ratio = tokenRatio(b.model);
+  setStatus(`COMPACTING CONTEXT // ${upto - start} messages`, "busy"); setActivity("Compacting", "thinking", "Summarising older messages so the chat fits the context window.");
+  const r = await fetch("/api/context/compact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    model: b.model, summary: (c.compact && c.compact.summary) || "", words: 400, max_chars: Math.max(4000, Math.floor(limit * 0.55 * ratio)),
+    messages: c.messages.slice(start, upto).map(m => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })) }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+  c.compact = { summary: d.summary, upto, at: Date.now(), count: (c.compact && c.compact.count || 0) + (upto - start), reason };
+  if (d.usage) recordUsage((Number(d.usage.prompt_tokens) || 0) + (Number(d.usage.completion_tokens) || 0), 0);
+  save(); if (chat() && chat().id === c.id && !liveGen) renderLog();
+  setStatus(`CONTEXT COMPACTED // ${upto - start} messages summarised`, "ok"); return true;
+}
+function addCompactMark(c){
+  const d = document.createElement("details"); d.className = "compact-mark";
+  d.innerHTML = `<summary>CONTEXT COMPACTED // ${c.compact.count || c.compact.upto} earlier messages summarised${c.compact.reason === "auto" ? " automatically" : ""} · click to read the summary</summary><div class="think-text">${esc(c.compact.summary)}</div>`;
+  $("#log").appendChild(d);
+}
+function addNote(text){ const d = document.createElement("div"); d.className = "chat-note"; d.setAttribute("role", "status"); d.textContent = text; const log = $("#log"); const e = log.querySelector(".empty"); if (e) e.remove(); log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
+
+/* ---------- message actions: edit, retry, branch ---------- */
+function addMsgActions(el, c, i){
+  if (!el || !c || c.swarmRun) return;
+  const m = c.messages[i], row = document.createElement("div"); row.className = "msg-actions";
+  const mk = (label, title, fn) => { const x = document.createElement("button"); x.type = "button"; x.className = "btn"; x.textContent = label; x.title = title; x.addEventListener("click", fn); row.appendChild(x); };
+  if (m.role === "user") mk("EDIT", "Edit this message and send it again. Later messages are replaced.", () => editMessage(el, c, i));
+  if (m.role === "assistant") {
+    const u = lastUserBefore(c, i); if (u >= 0) mk("RETRY", "Write this answer again", () => resendFrom(c, u));
+    if (m.usage) { const t = document.createElement("span"); t.className = "usage-muted"; t.textContent = `${Number(m.usage.prompt||0).toLocaleString()} in · ${Number(m.usage.completion||0).toLocaleString()} out${m.usage.source && m.usage.source !== "estimated" ? "" : " (est.)"}`; row.appendChild(t); }
+  }
+  mk("BRANCH", "Start a new chat with the history up to here", () => branchFrom(c, i));
+  el.appendChild(row);
+}
+function lastUserBefore(c, i){ for (let k = i; k >= 0; k--) if (c.messages[k] && c.messages[k].role === "user") return k; return -1; }
+function busyNow(){ return !!(ctrl || queueRunning || queueDrainPromise); }
+function resendFrom(c, u, newText){
+  if (busyNow()) { setStatus("WAIT FOR THE CURRENT REPLY TO FINISH", "err"); return false; }
+  const m = c.messages[u]; if (!m || m.role !== "user") return false;
+  const text = newText ?? m.content, imgs = (m.images || []).map(x => ({ name: x.name, data: x.data }));
+  c.messages = c.messages.slice(0, u); if (c.compact && c.compact.upto > u) delete c.compact;
+  if (S.chat !== c.id) S.chat = c.id;
+  save(); renderLog(); send(text, { attachments: imgs, noAtomic: true }); return true;
+}
+function editMessage(el, c, i){
+  if (busyNow()) { setStatus("WAIT FOR THE CURRENT REPLY TO FINISH", "err"); return; }
+  const body = el.querySelector(".body"), old = c.messages[i].content;
+  body.innerHTML = `<label class="sr" for="edit-${i}">Edit message</label><textarea class="msg-edit" id="edit-${i}"></textarea><div class="msg-actions"><button class="btn primary" type="button" data-act="send">SAVE &amp; SEND</button><button class="btn" type="button" data-act="cancel">CANCEL</button></div>`;
+  const ta = body.querySelector("textarea"); ta.value = old; ta.focus();
+  body.querySelector('[data-act="cancel"]').onclick = () => renderLog();
+  body.querySelector('[data-act="send"]').onclick = () => { const t = ta.value.trim(); if (t) resendFrom(c, i, t); };
+  ta.addEventListener("keydown", e => { if (e.key === "Escape") renderLog(); if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) body.querySelector('[data-act="send"]').click(); });
+}
+function branchFrom(c, i){
+  const n = { id: uid(), botId: c.botId, title: "↳ " + String(c.title || "Chat").replace(/^↳ /, "").slice(0, 54), messages: JSON.parse(JSON.stringify(c.messages.slice(0, i + 1))), branchOf: c.id };
+  if (c.compact && c.compact.upto <= i + 1) n.compact = { ...c.compact };
+  S.chats.unshift(n); S.chat = n.id; save(); renderAll(); setStatus("BRANCHED // new chat from message " + (i + 1), "ok"); $("#input").focus();
+}
+
+/* ---------- slash commands ---------- */
+let chatQuery = "";
+const SLASH = [
+  ["/compact", "Summarise older messages now to free context"],
+  ["/context", "Show context window and token usage"],
+  ["/remember", "Save a fact for every chat: /remember I use PowerShell"],
+  ["/forget", "Delete memories with these words: /forget PowerShell"],
+  ["/memory", "Open the memory manager"],
+  ["/retry", "Write the last answer again"],
+  ["/new", "Start a new chat with this bot"],
+  ["/help", "List the commands"],
+  ["/swarm", "Run a swarm of bots on a goal: /swarm build X"],
+];
+function isSlashCommand(t){ return /^\/(compact|context|remember|forget|memory|retry|new|clear|help)\b/i.test(String(t || "").trim()); }
+async function runSlash(t){
+  const [, cmd, rest = ""] = t.match(/^\/(\w+)\s*([\s\S]*)$/) || [];
+  const c = chat(), b = bot(); $("#input").value = ""; hideSlashHints();
+  try {
+    switch ((cmd || "").toLowerCase()) {
+      case "help": addNote(SLASH.map(([k, d]) => `${k.padEnd(10)} ${d}`).join("\n")); return "DONE";
+      case "context": if (!$("#usagePanel").classList.contains("open")) $("#usageBtn").click(); return "DONE";
+      case "memory": toggleMemoryPanel(true); return "DONE";
+      case "new": case "clear": newChat(); return "DONE";
+      case "remember": { if (!rest.trim()) { addNote("Usage: /remember <fact>"); return "ERROR"; } await memoryCall({ action: "add", text: rest.trim(), source: "chat" }); addNote("Saved to memory: " + rest.trim()); return "DONE"; }
+      case "forget": { if (!rest.trim()) { addNote("Usage: /forget <words>"); return "ERROR"; } const before = memoryData.items.length; await memoryCall({ action: "forget", text: rest.trim() }); addNote(`Forgot ${before - memoryData.items.length} memory item(s).`); return "DONE"; }
+      case "retry": { if (!c) return "ERROR"; const u = lastUserBefore(c, c.messages.length - 1); if (u < 0) { addNote("Nothing to retry yet."); return "ERROR"; } return resendFrom(c, u) ? "DONE" : "ERROR"; }
+      case "compact": {
+        if (!c || c.messages.length < 3) { addNote("Not enough messages to compact yet."); return "ERROR"; }
+        if (busyNow() && !queueRunning) { setStatus("WAIT FOR THE CURRENT REPLY TO FINISH", "err"); return "ERROR"; }
+        const upto = Math.max(compactStart(c) + 1, c.messages.length - 2);
+        if (upto <= compactStart(c)) { addNote("Nothing new to compact."); return "ERROR"; }
+        await compactChat(c, b, upto, "manual"); return "DONE";
+      }
+    }
+  } catch (e) { setStatus("COMMAND FAILED // " + e.message, "err"); addNote("Command failed: " + e.message); return "ERROR"; }
+  return "ERROR";
+}
+let slashIndex = 0;
+function slashMatches(){ const v = $("#input").value; if (!/^\/\S*$/.test(v)) return []; return SLASH.filter(([k]) => k.startsWith(v.toLowerCase())); }
+function renderSlashHints(){
+  const list = $("#slashHints"), rows = slashMatches();
+  if (!rows.length) return hideSlashHints();
+  slashIndex = Math.min(slashIndex, rows.length - 1);
+  list.innerHTML = rows.map(([k, d], i) => `<li role="option" id="slash-${i}" aria-selected="${i === slashIndex}" data-cmd="${k}"><b>${k}</b><span>${esc(d)}</span></li>`).join("");
+  list.hidden = false; $("#input").setAttribute("aria-activedescendant", "slash-" + slashIndex);
+  list.querySelectorAll("li").forEach(li => li.onmousedown = e => { e.preventDefault(); pickSlash(li.dataset.cmd); });
+}
+function hideSlashHints(){ const l = $("#slashHints"); if (l) { l.hidden = true; l.innerHTML = ""; } slashIndex = 0; $("#input").removeAttribute("aria-activedescendant"); }
+function pickSlash(cmd){ const needsArg = /^\/(remember|forget|swarm)$/.test(cmd); $("#input").value = cmd + (needsArg ? " " : ""); hideSlashHints(); $("#input").focus(); if (!needsArg) $("#form").requestSubmit(); }
+function slashKeydown(e){
+  const l = $("#slashHints"); if (!l || l.hidden) return false; const rows = slashMatches(); if (!rows.length) return false;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); slashIndex = (slashIndex + (e.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length; renderSlashHints(); return true; }
+  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && $("#input").value !== rows[slashIndex][0])) { e.preventDefault(); pickSlash(rows[slashIndex][0]); return true; }
+  if (e.key === "Escape") { e.preventDefault(); hideSlashHints(); return true; }
+  return false;
+}
+
+/* ---------- memory (Claude-style: facts kept across chats, stored by server.py) ---------- */
+let memoryData = { enabled: true, items: [] };
+async function memoryCall(payload){
+  const r = await fetch("/api/memory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const d = await r.json().catch(() => ({})); if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+  memoryData = { enabled: d.enabled !== false, items: d.items || [] }; renderMemory(); return memoryData;
+}
+async function loadMemory(){ try { const d = await (await fetch("/api/memory")).json(); if (d && d.ok) memoryData = { enabled: d.enabled !== false, items: d.items || [] }; } catch {} renderMemory(); }
+function renderMemory(){
+  const btn = $("#memoryBtn"); if (!btn) return;
+  btn.textContent = `MEMORY // ${memoryData.enabled ? memoryData.items.length : "OFF"}`;
+  $("#memoryEnabled").checked = memoryData.enabled;
+  const ul = $("#memoryList");
+  ul.innerHTML = memoryData.items.length ? "" : `<li class="usage-muted">No memories yet.</li>`;
+  memoryData.items.slice().reverse().forEach(x => {
+    const li = document.createElement("li"); li.innerHTML = `<span></span><button class="btn" type="button" data-a="edit">EDIT</button><button class="btn" type="button" data-a="del" aria-label="Delete memory">x</button>`;
+    li.querySelector("span").textContent = x.text;
+    li.querySelector('[data-a="del"]').onclick = () => memoryCall({ action: "delete", id: x.id }).catch(e => $("#memoryStatus").textContent = e.message);
+    li.querySelector('[data-a="edit"]').onclick = () => { const v = prompt("Edit memory:", x.text); if (v && v.trim()) memoryCall({ action: "update", id: x.id, text: v.trim() }).catch(e => $("#memoryStatus").textContent = e.message); };
+    ul.appendChild(li);
+  });
+}
+function toggleMemoryPanel(force){
+  const p = $("#memoryPanel"), open = force ?? !p.classList.contains("open");
+  p.classList.toggle("open", open); $("#memoryBtn").setAttribute("aria-expanded", String(open));
+  if (open) { loadMemory(); arrangeInfoPanels("memoryPanel"); setTimeout(() => $("#memoryText").focus(), 0); } else arrangeInfoPanels();
 }
 
 
@@ -1017,13 +1318,158 @@ function renderBots(){
     wrap.appendChild(el);
   });
 }
+// Badge for a swarm chat, styled like the model badge. A bot and the Swarm Lead do different jobs, so they show different states.
+const SWARM_LEAD_PHASE = { plan: "PLANNING", bots: "BOTS WORKING", combine: "COMBINING", tests: "TESTING", review: "REVIEWING" };
+// Tests that ran and did not pass. "no_code" and "off" are not failures.
+const swarmTestsBad = c => !!c.swarmTestsStatus && !["passed", "no_code", "off"].includes(c.swarmTestsStatus);
+function swarmBadge(c){
+  if (!c.swarmRun) return null;
+  const kind = c.swarmFinal ? "SWARM LEAD" : "SWARM BOT";
+  if (!c.swarmLive && c.swarmStatus) {
+    if (c.swarmFinal && c.swarmStatus === "completed" && swarmTestsBad(c)) return [kind + " · DONE, TESTS FAILED", "busy"];
+    const done = { completed: ["DONE", "ok"], failed: [c.swarmTimeout ? "TIMED OUT" : "FAILED", "err"], cancelled: ["STOPPED", "err"] }[c.swarmStatus] || [String(c.swarmStatus).toUpperCase(), ""];
+    return [kind + " · " + done[0], done[1]];
+  }
+  if (c.swarmFinal) return c.swarmPhase ? [kind + " · " + (SWARM_LEAD_PHASE[c.swarmPhase] || "WORKING"), "busy"] : [kind + " · QUEUED", ""];
+  if (c.swarmStalled) return [kind + " · STALLED", "err"];
+  return c.swarmTaskStatus === "claimed" ? [kind + " · RUNNING", "busy"] : [kind + " · QUEUED", ""];
+}
+// Short state of one swarm chat: [mark, word, css class]. Used by the chips in the list and in the state bar.
+function swarmState(c){
+  if (!c.swarmLive && c.swarmStatus) {
+    if (c.swarmStatus === "completed") return c.swarmFinal && swarmTestsBad(c) ? ["!", "TESTS FAILED", "busy"] : ["✓", "DONE", "ok"];
+    if (c.swarmStatus === "cancelled") return ["■", "STOPPED", "stopped"];
+    if (c.swarmStatus === "failed" && c.swarmTimeout) return ["⧗", "TIMED OUT", "timeout"];
+    return ["✕", c.swarmStatus === "failed" ? "FAILED" : String(c.swarmStatus).toUpperCase(), "err"];
+  }
+  if (c.swarmFinal) return c.swarmPhase ? ["●", SWARM_LEAD_PHASE[c.swarmPhase] || "WORKING", "busy"] : ["○", "QUEUED", "queued"];
+  if (c.swarmStalled) return ["!", "STALLED", "stall"];
+  return c.swarmTaskStatus === "claimed" ? ["●", "RUNNING", "busy"] : ["○", "QUEUED", "queued"];
+}
+// Role and goal of a swarm chat. New chats store them. Old chats only have the "[SWARM] Who: goal" title.
+function swarmParts(c){
+  const m = /^\[SWARM\]\s*([^:]+):\s*(.*)$/.exec(c.title || "");
+  const role = c.swarmFinal ? "SWARM LEAD" : String(c.swarmRole || (m ? m[1] : "Bot")).replace(/^10x:\s*/i, "").toUpperCase();
+  return { role, goal: c.swarmGoal || (m ? m[2] : c.title || "") , task: c.swarmTask || "" };
+}
+function swarmChip(c){
+  const st = swarmState(c), p = swarmParts(c);
+  return `<span class="chip ${st[2]}" title="${esc(p.role + " · " + st[1])}"><span aria-hidden="true">${st[0]}</span> ${esc(p.role)}<span class="sr"> · ${esc(st[1])}</span></span>`;
+}
+// State bar above the open swarm chat: shows the steps of this chat's job and where it is now.
+// In the Lead chat it also shows each bot of the run, live. A click on a bot opens that bot's chat.
+const SWARM_LEAD_STEPS = [["plan", "PLAN"], ["bots", "BOTS"], ["combine", "COMBINE"], ["tests", "TESTS"], ["review", "REVIEW"]];
+const SWARM_BOT_STEPS = [["queued", "QUEUED"], ["running", "RUNNING"], ["done", "DONE"]];
+function renderSwarmBar(){
+  const bar = $("#swarmBar"); if (!bar) return;
+  const c = chat(), b = c && swarmBadge(c);
+  if (!b) { bar.hidden = true; bar.innerHTML = ""; return; }
+  const steps = c.swarmFinal ? SWARM_LEAD_STEPS : SWARM_BOT_STEPS;
+  const ended = !c.swarmLive && c.swarmStatus;
+  let now = c.swarmFinal ? steps.findIndex(x => x[0] === c.swarmPhase) : (c.swarmTaskStatus === "claimed" || c.swarmStatus === "failed" ? 1 : 0);
+  if (c.swarmFinal && now < 0) now = 0;
+  const ok = ended && c.swarmStatus === "completed", bad = ended && !ok;
+  const cells = steps.map((x, i) => {
+    let cls = ok || i < now ? "done" : i === now ? (bad ? "bad" : "now") : "";
+    if (ok && c.swarmFinal && x[0] === "tests" && swarmTestsBad(c)) cls = "bad";
+    const mark = cls === "done" ? "✓ " : cls === "now" ? "● " : cls === "bad" ? "✕ " : "○ ";
+    return `<span class="st ${cls}">${mark}${x[1]}</span>`;
+  }).join("");
+  const run = S.chats.filter(x => x.swarmRun === c.swarmRun);
+  const others = c.swarmFinal ? run.filter(x => !x.swarmFinal) : run.filter(x => x.swarmFinal);
+  const done = run.filter(x => !x.swarmFinal && x.swarmStatus === "completed").length, total = run.filter(x => !x.swarmFinal).length;
+  const peers = others.length ? `<span class="sep" aria-hidden="true">|</span>${c.swarmFinal ? `<span class="st">BOTS ${done}/${total}</span>` : ""}${others.map(x => {
+    const st = swarmState(x), p = swarmParts(x);
+    return `<button type="button" class="chip ${st[2]}" data-open="${esc(x.id)}" title="Open ${esc(p.role)} chat · ${esc(st[1])}"><span aria-hidden="true">${st[0]}</span> ${esc(p.role)}<span class="sr"> · ${esc(st[1])}</span></button>`;
+  }).join("")}` : "";
+  const logs = `<button type="button" class="chip" data-botlogs title="Open this run in Operations > llama-swap > Bot Logs">LOGS</button>`;
+  bar.innerHTML = `<span class="badge ${b[1]}">${esc(b[0])}</span>${cells}${peers}${logs}${c.swarmError ? `<span class="st bad">${esc(String(c.swarmError).slice(0, 160))}</span>` : ""}`;
+  bar.querySelector("[data-botlogs]").onclick = () => openBotLogs(c.swarmRun);
+  bar.querySelectorAll("[data-open]").forEach(el => el.onclick = () => { const t = S.chats.find(x => x.id === el.dataset.open); if (!t) return; S.bot = t.botId; S.chat = t.id; save(); renderAll(); });
+  bar.hidden = false;
+  syncSwarmActivity(c);
+}
+// The activity line ("Done · Response finished") shows the open swarm chat's backend state, not the /swarm request.
+function syncSwarmActivity(c){
+  const st = swarmState(c), p = swarmParts(c);
+  let [label, state] = { ok: ["Done", "done"], err: ["Failed", "failed"], timeout: ["Timed out", "failed"], stall: ["Stalled", "attention"], busy: ["Working", "task"] }[st[2]] || ["Waiting", "idle"];
+  if (st[1] === "STOPPED") [label, state] = ["Stopped", "idle"];
+  if (st[1] === "TIMED OUT") label = "Timed out";
+  if (st[1] === "TESTS FAILED") [label, state] = ["Needs attention", "attention"];
+  const detail = c.swarmError ? `${p.role}: ${String(c.swarmError).slice(0, 200)}`
+    : `${p.role} · ${st[1].toLowerCase()}${st[2] === "busy" && c.swarmPhase ? " · " + (SWARM_LEAD_PHASE[c.swarmPhase] || c.swarmPhase).toLowerCase() : ""}.`;
+  if ($("#activityState")?.textContent === label && $("#activityDetail")?.textContent === detail) return;
+  setActivity(label, state, detail, state === "failed" ? "error" : state);
+}
+function openBotLogs(run){
+  showPage("ops");
+  const f = $("#llama-iframe"); if (f) f.src = "http://127.0.0.1:8091/ui/#/atlas-bot-logs" + (run ? "?run=" + encodeURIComponent(run) : "");
+}
+let chatTab = "chats";
+function setChatTab(t){ chatTab = t; renderChats(); }
+$("#tabChats").addEventListener("click", () => setChatTab("chats"));
+$("#tabSwarm").addEventListener("click", () => setChatTab("swarm"));
+function openChatRow(c){ S.bot = c.botId; S.chat = c.id; save(); renderAll(); closeMenu(); }
+// SWARM tab: one folder per run. The Swarm Lead is the parent row. The arrow shows or hides the bot chats of that run.
+// The open state is stored on the Lead chat (swarmOpen). Without a stored choice, a live run or a run with the open chat is open.
+function swarmGroups(){
+  const groups = new Map();
+  S.chats.filter(c => c.swarmRun).forEach(c => { if (!groups.has(c.swarmRun)) groups.set(c.swarmRun, []); groups.get(c.swarmRun).push(c); });
+  return [...groups.entries()].map(([run, list]) => ({ run, lead: list.find(c => c.swarmFinal) || null, bots: list.filter(c => !c.swarmFinal) }));
+}
+function renderSwarmTree(ul){
+  const groups = swarmGroups();
+  if (!groups.length) { ul.innerHTML = `<li class="none">No swarm runs yet. Type /swarm and a goal in a chat.</li>`; return; }
+  groups.forEach(g => {
+    const all = (g.lead ? [g.lead] : []).concat(g.bots);
+    const head = g.lead || g.bots[0];
+    const stored = g.lead && typeof g.lead.swarmOpen === "boolean" ? g.lead.swarmOpen : null;
+    const open = stored !== null ? stored : all.some(c => c.swarmLive || c.id === S.chat);
+    const done = g.bots.filter(c => c.swarmStatus === "completed").length;
+    const p = swarmParts(head), kids = g.lead ? g.bots : g.bots.slice(1);
+    const li = document.createElement("li"); li.className = "swarm-run" + (head.id === S.chat ? " active" : "");
+    const listId = "swarm-steps-" + String(g.run).replace(/[^\w-]/g, "");
+    li.innerHTML = `<button class="caret" type="button" aria-expanded="${open}" aria-controls="${listId}" aria-label="${open ? "Hide" : "Show"} the ${kids.length} bot chats of this swarm run"${kids.length ? "" : " disabled"}>${open ? "▾" : "▸"}</button>`
+      + `<button class="open" type="button" title="${esc(head.title)}">${g.lead ? swarmChip(g.lead) : `<span class="chip">SWARM</span>`}<span class="t">${esc(p.goal)}</span><span class="n" title="Bots done">${done}/${g.bots.length}</span></button>`
+      + `<button class="del" type="button" aria-label="Delete this swarm run (${all.length} chats)">x</button>`;
+    const toggle = () => { if (!g.lead) return; g.lead.swarmOpen = !open; save(); renderChats(); };
+    li.querySelector(".caret").onclick = toggle;
+    li.querySelector(".open").onclick = () => { if (g.lead && !open) g.lead.swarmOpen = true; openChatRow(head); };
+    li.querySelector(".open").addEventListener("keydown", e => { if (e.key === "ArrowRight" && !open) { e.preventDefault(); toggle(); } if (e.key === "ArrowLeft" && open) { e.preventDefault(); toggle(); } });
+    li.querySelector(".del").onclick = () => {
+      if (!confirm(`Delete this swarm run? This removes ${all.length} chats (the Swarm Lead and its bots).`)) return;
+      const ids = new Set(all.map(c => c.id)); S.chats = S.chats.filter(x => !ids.has(x.id)); if (ids.has(S.chat)) S.chat = null; save(); renderAll();
+    };
+    ul.appendChild(li);
+    if (!open || !kids.length) return;
+    const sub = document.createElement("li"); sub.className = "swarm-steps";
+    const inner = document.createElement("ul"); inner.id = listId; inner.setAttribute("aria-label", "Bot chats of this swarm run");
+    kids.forEach(c => {
+      const k = document.createElement("li"); if (c.id === S.chat) k.className = "active";
+      const kp = swarmParts(c);
+      k.innerHTML = `<button class="open" type="button" title="${esc(c.title)}">${swarmChip(c)}<span class="t">${esc(kp.task || kp.goal)}</span></button><button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
+      k.querySelector(".open").onclick = () => openChatRow(c);
+      k.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; save(); renderAll(); };
+      inner.appendChild(k);
+    });
+    sub.appendChild(inner); ul.appendChild(sub);
+  });
+}
 function renderChats(){
+  renderSwarmBar();
   const b = bot(); $("#chatsTitle").textContent = "02 // CHATS: " + b.name.toUpperCase();
   const ul = $("#chats"); ul.innerHTML = "";
-  S.chats.filter(c => c.botId === b.id).forEach(c => {
+  ["Chats", "Swarm"].forEach(n => { const t = $("#tab" + n); if (t) t.setAttribute("aria-selected", String((n === "Swarm") === (chatTab === "swarm"))); });
+  if (chatTab === "swarm") { renderSwarmTree(ul); return; }
+  // CHATS lists this bot's normal chats. Swarm chats live in the SWARM tab.
+  const q = chatQuery.trim().toLowerCase();
+  const matches = c => !q || String(c.title||"").toLowerCase().includes(q) || (c.messages||[]).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(q));
+  const rows = S.chats.filter(c => c.botId === b.id && !c.swarmRun && matches(c));
+  if (q && !rows.length) { ul.innerHTML = `<li class="usage-muted" style="padding:8px">No chats match "${esc(chatQuery.trim())}".</li>`; return; }
+  rows.forEach(c => {
     const li = document.createElement("li"); if (c.id === S.chat) li.className = "active";
     li.innerHTML = `<button class="open" type="button">${c.atomic ? "↳ " : ""}${esc(c.title)}${c.atomic ? " · ATOMIC" : ""}</button><button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
-    li.querySelector(".open").onclick = () => { S.chat = c.id; save(); renderAll(); closeMenu(); };
+    li.querySelector(".open").onclick = () => openChatRow(c);
     li.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; save(); renderAll(); };
     ul.appendChild(li);
   });
@@ -1034,7 +1480,11 @@ function renderLog(){
   $("#title").textContent = "03 // " + b.name.toUpperCase();
   const openOps=$("#openOpsConversation"); if(openOps)openOps.hidden=!c;
   if (!c || !c.messages.length) { log.innerHTML = `<div class="empty">${esc(b.name.toUpperCase())} // READY<br>${esc(b.desc||"")}</div>`; renderQueue(); return; }
-  c.messages.forEach(m => addMsg(m.role, m.content, m.model, m.stats, m.reasoningSummary, (m.attachments||[]).map(name => ({name})), m.at||0, m));
+  c.messages.forEach((m, i) => {
+    if (c.compact && c.compact.upto === i && c.compact.summary) addCompactMark(c);
+    const el = addMsg(m.role, m.content, m.model, m.stats, m.reasoningSummary, (m.attachments||[]).map(name => ({ name, data: (m.images||[]).find(i => i.name === name)?.data })), m.at||0, m);
+    addMsgActions(el, c, i);
+  });
   if (liveGen && liveGen.chatId === c.id) log.appendChild(liveGen.box);  // back in the chat that is still generating
   renderQueue();  // waiting messages go last, after the live reply
 }
@@ -1136,7 +1586,7 @@ function startAtomicChat(previous,text){
   return c;
 }
 /* ---------- swarm: one chat per bot, with a live plain-language log ---------- */
-let swarmRun = null; const swarmTimers = {};
+let swarmRun = null; const swarmTimers = {}; const swarmSummaryBusy = new Set();
 function swarmWatch(c){
   if (swarmTimers[c.id]) return;
   let cursor = c.swarmCursor || 0, busy = false;
@@ -1146,47 +1596,211 @@ function swarmWatch(c){
       const r = await fetch(`/api/ops/swarm/log?conversation_id=${encodeURIComponent(c.id)}&after=${cursor}`, { cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
+      if (c.swarmTaskStatus !== d.status || c.swarmPhase !== (d.phase || "")) { c.swarmTaskStatus = d.status; c.swarmPhase = d.phase || ""; renderChats(); }
       if (d.lines && d.lines.length) {
         let m = c.messages.find(x => x.swarmLog);
         if (!m) { m = { role: "assistant", swarmLog: true, model: "swarm log", content: "", at: Date.now() }; c.messages.push(m); }
         const rows = d.lines.map(l => `**${new Date(l.ts * 1000).toLocaleTimeString()}** ${l.level === "error" ? "(problem) " : ""}${l.message}`);
         m.content = (m.content ? m.content + "\n\n" : "") + rows.join("\n\n");
-        cursor = c.swarmCursor = d.next; save();
+        cursor = c.swarmCursor = d.next;
+        // The Swarm Lead chat shows every bot's live lines too, so one chat tells the whole story of this run.
+        const lead = c.swarmFinal ? null : S.chats.find(x => x.swarmRun === c.swarmRun && x.swarmFinal);
+        if (lead) {
+          let lm = lead.messages.find(x => x.swarmLog);
+          if (!lm) { lm = { role: "assistant", swarmLog: true, model: "swarm log", content: "", at: Date.now() }; lead.messages.push(lm); }
+          const who = (S.bots.find(b => b.id === c.botId) || {}).name || "A bot";
+          const lrows = d.lines.map(l => `**${new Date(l.ts * 1000).toLocaleTimeString()}** [${who}] ${l.level === "error" ? "(problem) " : ""}${l.message}`);
+          lm.content = (lm.content ? lm.content + "\n\n" : "") + lrows.join("\n\n");
+        }
+        save();
         if (chat() && chat().id === c.id) renderLog();
+        if (lead && chat() && chat().id === lead.id) renderLog();
       }
-      if (d.done) { c.swarmLive = false; save(); clearInterval(swarmTimers[c.id]); delete swarmTimers[c.id]; }
+      if (d.done) { c.swarmLive = false; c.swarmStatus = d.status || "unknown"; c.swarmError = d.error || ""; save(); renderChats(); clearInterval(swarmTimers[c.id]); delete swarmTimers[c.id]; swarmLeadTests(c); swarmFinishCheck(c); }
     } catch {} finally { busy = false; }
   };
   swarmTimers[c.id] = setInterval(tick, 2000); tick();
 }
-function startSwarmChats(run){
+// Backend truth. Every 3 s (page visible, swarm chats exist) read /api/ops/swarm/runs and copy each task's real
+// state into its chat. This fixes chats whose poller stopped, chats from before a restart, and stalled or timed-out bots.
+let swarmSyncBusy = false;
+async function swarmSync(){
+  if (swarmSyncBusy || document.hidden || !S.chats.some(c => c.swarmRun)) return;
+  swarmSyncBusy = true;
+  try {
+    const r = await fetch("/api/ops/swarm/runs?limit=60&lines=1", { cache: "no-store" });
+    if (!r.ok) return;
+    const d = await r.json(); let changed = false;
+    for (const run of d.runs || []) for (const t of run.chats.concat(run.lead ? [run.lead] : [])) {
+      const c = S.chats.find(x => x.id === t.conversation_id); if (!c) continue;
+      const final = ["done", "failed", "timeout", "cancelled"].includes(t.state);
+      const next = { swarmTaskStatus: t.status, swarmPhase: t.phase || "", swarmLive: !final,
+                     swarmStatus: final ? t.status : "", swarmError: t.error || "",
+                     swarmTimeout: t.state === "timeout", swarmStalled: t.state === "stalled" };
+      for (const k in next) if (c[k] !== next[k]) { c[k] = next[k]; changed = true; }
+      if (!final) swarmWatch(c);
+    }
+    if (changed) { save(); renderChats(); }
+  } catch {} finally { swarmSyncBusy = false; }
+}
+setInterval(swarmSync, 3000); setTimeout(swarmSync, 500);
+// The Lead badge reads the test result of the run, so a run with failed tests does not show plain DONE.
+async function swarmLeadTests(c){
+  if (!c.swarmFinal || c.swarmStatus !== "completed" || c.swarmTestsStatus) return;
+  try { const saved = await fetchSwarmSavedResult(c.id); const ts = (saved.result || {}).tests || {}; c.swarmTestsStatus = ts.status || "none"; save(); renderChats(); } catch {}
+}
+// Retrieve a finished task's persisted result. Retry transient HTTP/JSON failures; never
+// silently substitute a status-only summary for a missing answer.
+async function fetchSwarmSavedResult(conversationId){
+  let lastError = "Result unavailable";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`/api/ops/swarm/result?conversation_id=${encodeURIComponent(conversationId)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!data || data.ok !== true || !data.result || typeof data.result !== "object")
+        throw new Error((data && data.error) || "The task has no saved result");
+      return data;
+    } catch (error) {
+      lastError = String(error && error.message || error).slice(0, 240);
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  throw new Error(lastError);
+}
+function swarmTrimResult(value, limit=16000){
+  const text = String(value == null ? "" : value).trim();
+  return text.length > limit ? text.slice(0, limit) + "\n\n[Answer shortened in the originating chat; open this bot's Swarm chat for the full answer.]" : text;
+}
+// Deliver every bot's saved answer to the chat where /swarm was entered. A deterministic
+// message marker makes retries/refreshes update the same message instead of duplicating it.
+async function swarmFinishCheck(c){
+  const run = S.chats.filter(x => x.swarmRun === c.swarmRun);
+  if (!run.length || run.some(x => !x.swarmStatus)) return;
+  const origin = S.chats.find(x => x.id === c.swarmOrigin);
+  if (!origin || swarmSummaryBusy.has(c.swarmRun)) return;
+  origin.swarmSummaries = Array.isArray(origin.swarmSummaries) ? origin.swarmSummaries : [];
+  if (origin.swarmSummaries.includes(c.swarmRun)) return;
+  swarmSummaryBusy.add(c.swarmRun);
+  try {
+    const lead = run.find(x => x.swarmFinal), bots = run.filter(x => !x.swarmFinal);
+    const name = x => (S.bots.find(b => b.id === x.botId) || {}).name || "A bot";
+    const count = status => run.filter(x => x.swarmStatus === status).length;
+    const done = count("completed"), failed = count("failed"), stopped = count("cancelled");
+    const head = failed ? "SWARM FINISHED WITH PROBLEMS" : stopped ? "SWARM STOPPED" : "SWARM FINISHED";
+    const parts = [`${done} done`]; if (failed) parts.push(`${failed} failed`); if (stopped) parts.push(`${stopped} stopped`);
+    const rows = bots.map(x => `- **${name(x)}**: ${x.swarmStatus === "completed" ? "done" : x.swarmStatus === "failed" ? "failed" + (x.swarmError ? ". " + x.swarmError.slice(0, 300) : "") : x.swarmStatus === "cancelled" ? "stopped" : x.swarmStatus}`);
+    const sections = [];
+    const failures = [];
+    for (const b of bots) {
+      if (b.swarmStatus !== "completed") continue;
+      try {
+        const saved = await fetchSwarmSavedResult(b.id);
+        const answer = saved.result.answer;
+        if (typeof answer !== "string" || !answer.trim()) throw new Error("Saved task result contains no answer");
+        sections.push(`## ${name(b)} — result\n\n${swarmTrimResult(answer)}`);
+      } catch (error) {
+        failures.push(`${name(b)} (${b.id}): ${String(error.message || error).slice(0, 240)}`);
+      }
+    }
+    if (lead && lead.swarmStatus === "completed") {
+      try {
+        const saved = await fetchSwarmSavedResult(lead.id);
+        const r = saved.result || {}, ts = r.tests || {}, w = r.where || {};
+        const plan = Object.entries(r.plan || {}).map(([agent, task]) => `- **${agent}**: ${task}`).join("\n") || "(no plan saved)";
+        sections.push(`## Swarm Lead — combined result\n\n### Plan (${w.plan || "?"})\n${plan}\n\n### Combined result (${w.combine || "?"})\n${swarmTrimResult(r.combined || "(empty)", 24000)}\n\n### Tests\n${swarmTrimResult(ts.text || "(no test result)", 12000)}\n\n### Review (${w.review || "?"})\n${swarmTrimResult(r.review || "(empty)", 12000)}`);
+      } catch (error) {
+        failures.push(`Swarm Lead (${lead.id}): ${String(error.message || error).slice(0, 240)}`);
+      }
+    } else if (lead && lead.swarmStatus !== "completed") {
+      sections.push(`## Swarm Lead — ${lead.swarmStatus}${lead.swarmError ? "\n\n" + lead.swarmError.slice(0, 500) : ""}`);
+    }
+    const allResultsRetrieved = failures.length === 0;
+    const deliveryNote = allResultsRetrieved
+      ? "All available task results were retrieved and saved in this chat."
+      : `**RESULT DELIVERY INCOMPLETE**\n\nSome saved results could not be retrieved:\n${failures.map(x => `- ${x}`).join("\n")}\n\nAtlas will retry delivery the next time it opens. The individual Swarm chats remain available.`;
+    const content = `**${head}**: ${parts.join(", ")}.\n\n${rows.join("\n")}\n\n${sections.join("\n\n---\n\n") || "No successful bot answers were available."}\n\n${deliveryNote}`;
+    const existing = origin.messages.find(m => m.swarmDeliveryRun === c.swarmRun);
+    if (existing) { existing.content = content; existing.at = Date.now(); }
+    else origin.messages.push({ role: "assistant", content, model: "swarm", at: Date.now(), swarmDeliveryRun: c.swarmRun });
+    if (allResultsRetrieved) origin.swarmSummaries.push(c.swarmRun);
+    save(); if (chat() && chat().id === origin.id) renderLog();
+  } catch (error) {
+    // Keep the run retryable. The next app startup will retry without duplicating a message.
+    const content = `**SWARM RESULT DELIVERY ERROR**\n\n${String(error && error.message || error).slice(0, 400)}\n\nThe individual Swarm chats are intact. Atlas will retry delivery the next time it opens.`;
+    const existing = origin.messages.find(m => m.swarmDeliveryRun === c.swarmRun);
+    if (existing) existing.content = content;
+    else origin.messages.push({ role: "assistant", content, model: "swarm", at: Date.now(), swarmDeliveryRun: c.swarmRun });
+    save(); if (chat() && chat().id === origin.id) renderLog();
+  } finally { swarmSummaryBusy.delete(c.swarmRun); }
+}
+// Short, tagged title: "[SWARM] CTO: time in japan". Bot name without the "10x: " prefix, then the goal.
+function swarmChatTitle(run, st){
+  const who = st.final ? "Lead" : String(st.agent || "Bot").replace(/^10x:\s*/i, "");
+  const goal = String(run.goal || st.task || "").replace(/\s+/g, " ").trim();
+  const t = `[SWARM] ${who}: ${goal}`;
+  return t.length > 40 ? t.slice(0, 39).trimEnd() + "…" : t;
+}
+function startSwarmChats(run, originId){
+  chatTab = "swarm";
+  // Each swarm chat is an ATOMIC chat: linked to the chat where /swarm was typed (parent + group + context capsule),
+  // so it keeps that context but stays its own isolated workstream inside its bot.
+  const origin = S.chats.find(x => x.id === originId);
   for (const st of run.steps) {
     if (S.chats.some(x => x.id === st.conversation_id)) continue;
     const b = S.bots.find(x => x.name === st.agent) || bot();
-    S.chats.unshift({ id: st.conversation_id, botId: b.id, title: `Swarm: ${st.task}`.slice(0, 60), messages: [], swarmRun: run.run_id, swarmLive: true, createdAt: new Date().toISOString() });
+    const c = { id: st.conversation_id, botId: b.id, title: swarmChatTitle(run, st), swarmRole: st.final ? "Lead" : String(st.agent || "Bot").replace(/^10x:\s*/i, ""), swarmGoal: String(run.goal || st.task || "").replace(/\s+/g, " ").trim(), swarmTask: String(st.task || "").replace(/\s+/g, " ").trim(), messages: [], swarmRun: run.run_id, swarmOrigin: originId || "", swarmLive: true, swarmFinal: !!st.final, createdAt: new Date().toISOString() };
+    if (origin) {
+      Object.assign(c, { atomic: true, atomicGroupId: origin.atomicGroupId || origin.id, parentChatId: origin.id,
+                         contextCapsule: atomicCapsule(origin, `${st.agent}: ${st.task}`), topicTerms: atomicTerms(st.task) });
+      origin.atomicChildren = Array.isArray(origin.atomicChildren) ? origin.atomicChildren : [];
+      origin.atomicChildren.push(c.id);
+    }
+    S.chats.unshift(c);
   }
   save(); renderAll();
   S.chats.filter(x => x.swarmRun === run.run_id).forEach(swarmWatch);
 }
-function resumeSwarmWatchers(){ S.chats.filter(x => x.swarmLive).forEach(swarmWatch); }
+function resumeSwarmWatchers(){
+  S.chats.filter(x => x.swarmLive).forEach(swarmWatch);
+  S.chats.filter(x => x.swarmFinal && x.swarmStatus === "completed" && !x.swarmTestsStatus).forEach(swarmLeadTests);
+  // Completed runs may still need result delivery after a refresh or an earlier fetch failure.
+  const checked = new Set();
+  S.chats.filter(x => x.swarmRun && x.swarmStatus && x.swarmOrigin).forEach(x => {
+    if (checked.has(x.swarmRun)) return; checked.add(x.swarmRun); swarmFinishCheck(x);
+  });
+}
 
 async function send(text, options={}){
+  if (!options.attachments && isSlashCommand(text)) return runSlash(text.trim());
   const b = bot(), attachments = options.attachments || pending.slice();
   const images=attachments.filter(f=>f.data);
   if(images.length){
     const support=["vision","text-only"].includes(b.imageSupport)?b.imageSupport:"unknown";
     if(support==="text-only"){setStatus("IMAGE INPUT BLOCKED FOR THIS MODEL","err");setActivity("Needs attention","attention","This bot is set to text-only.","error");return "ERROR";}
-    if(support==="unknown"&&!confirm(`Image support is not verified for ${b.model}. Send ${images.length} image${images.length===1?"":"s"} anyway?`)){setStatus("IMAGE REQUEST NOT SENT","ok");return "STOPPED";}
+    if(support==="unknown"){
+      // Ask the model server. llama-server says vision:true only when it loaded a projector (--mmproj).
+      setStatus("CHECKING IMAGE SUPPORT // loading "+b.model+"...","ok");
+      let found=null;
+      try{ const r=await fetch("/api/vision?model="+encodeURIComponent(b.model)); const d=await r.json(); if(typeof d.vision==="boolean")found=d.vision; }catch{}
+      if(found===true){b.imageSupport="vision";save();renderBots();}
+      else if(found===false){b.imageSupport="text-only";save();renderBots();setStatus("IMAGE INPUT BLOCKED // "+b.model+" has no vision projector (mmproj)","err");setActivity("Needs attention","attention","This model cannot read images. Put the mmproj .gguf next to the model, or pick a vision model.","error");return "ERROR";}
+      else if(!confirm(`Could not check image support for ${b.model}. Send ${images.length} image${images.length===1?"":"s"} anyway?`)){setStatus("IMAGE REQUEST NOT SENT","ok");return "STOPPED";}
+    }
   }
   if(!options.attachments)$("#input").value="";
   let c = chat() || newChat();
   setActivity("Thinking","thinking",`Waiting for ${b.model}.`);
-  if(atomicShiftCandidate(text,c)) c=startAtomicChat(c,text);
+  if(!options.noAtomic && atomicShiftCandidate(text,c)) c=startAtomicChat(c,text);
   if(!options.attachments){ pending = []; renderPending(); }
   const textFiles = attachments.filter(f => f.text).map(f => `\n\nFile: ${f.name}\n\`\`\`\n${f.text}\n\`\`\``).join("");
   const content = text + textFiles;
-  c.messages.push({ role: "user", content, attachments: attachments.map(f => f.name), at: Date.now() }); if (c.title === "New chat") c.title = atomicTopicTitle(text);
+  c.messages.push({ role: "user", content, attachments: attachments.map(f => f.name), at: Date.now(), ...(images.length ? { images: images.map(f => ({ name: f.name, data: f.data })) } : {}) });
+  // Keep pictures for the 3 newest image messages so follow-up questions still see them. Older ones keep only their file names.
+  c.messages.filter(m => m.images).slice(0, -3).forEach(m => { delete m.images; }); if (c.title === "New chat") c.title = atomicTopicTitle(text);
   const userMsg = c.messages[c.messages.length-1]; save(); renderChats(); const userEl = addMsg("user", content, null, null, null, attachments, userMsg.at, userMsg);
+  if (!ctxWindows[b.model]) fetchModelWindow(b.model).then(n => { if (n && lastContext && lastContext.model === b.model) { lastContext.limit = effectiveContextLimit(b); lastContext.windowSource = "llama-server n_ctx"; renderContextMeter(); } });
+  try { await maybeAutoCompact(c, b); } catch (e) { setStatus("COMPACT FAILED // older messages will be trimmed: " + e.message, "err"); }
   let readMarked = false; const markRead = () => { if (readMarked) return; readMarked = true; userMsg.readAt = Date.now(); userMsg.readBy = b.model; setReceipt(userEl, userMsg); save(); };
   const box = addMsg("assistant", "", b.model), body = box.querySelector(".body");
   liveGen = { chatId: c.id, box };
@@ -1197,30 +1811,38 @@ async function send(text, options={}){
   box.insertBefore(act, body); box.insertBefore(think, body);
   const thinkText = think.querySelector(".think-text");
   const strip = s => String(s).replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
-  const apiMessages = c.messages.map(m => ({ role: m.role, content: m.role === "assistant" ? strip(m.content) : m.content }));
-  const imageParts = attachments.filter(f => f.data).map(f => ({ type: "image_url", image_url: { url: f.data } }));
-  if (imageParts.length) {
-    const last = apiMessages[apiMessages.length - 1];
-    last.content = [{ type: "text", text: content || "Please inspect the attached image(s)." }, ...imageParts];
-  }
-  const contextLimit = Math.max(2048, Number(b.context_length || 32768));
+  const fromIndex = compactStart(c);
+  const apiMessages = c.messages.slice(fromIndex).map(m => {
+    if (m.role === "assistant") return { role: m.role, content: strip(m.content) };
+    const pics = b.imageSupport !== "text-only" && Array.isArray(m.images) ? m.images.filter(f => f && f.data) : [];
+    if (!pics.length) return { role: m.role, content: m.content };
+    return { role: m.role, content: [{ type: "text", text: m.content || "Please inspect the attached image(s)." }, ...pics.map(f => ({ type: "image_url", image_url: { url: f.data } }))] };
+  });
+  const imageParts = apiMessages.flatMap(m => Array.isArray(m.content) ? m.content.filter(x => x.type === "image_url") : []);
+  const contextLimit = effectiveContextLimit(b), ratio = tokenRatio(b.model);
   const outputReserve = Math.max(512, Number(b.max_tokens || 2048));
   const systemParts=[b.system||""];
   skillsFor(b).forEach(s=>systemParts.push("SKILL // "+s.name+":\n"+s.prompt));
   if(c.contextCapsule) systemParts.push("ATOMIC CHAT CONTEXT CAPSULE\n"+c.contextCapsule);
+  const summaryText = fromIndex && c.compact && c.compact.summary ? "EARLIER CONVERSATION SUMMARY (older messages of this chat were compacted to save context; treat this as real history)\n"+c.compact.summary : "";
+  if(summaryText) systemParts.push(summaryText);
   if(Array.isArray(c.knowledgeCapsules)) c.knowledgeCapsules.slice(-3).forEach(k=>systemParts.push("SOURCE-GROUNDED STUDY CAPSULE // "+k.title+"\nTreat this capsule as reference material, preserve its source limitations, and cite its source names when relevant.\n"+k.content));
   const systemPrompt=systemParts.filter(Boolean).join("\n\n");
-  const trimmed = trimToContext(apiMessages, systemPrompt, contextLimit, outputReserve);
+  const serverReserve = Number(lastContext && lastContext.model===b.model ? (lastContext.memory||0)+(lastContext.knowledge||0)+(lastContext.other||0) : 0) || 1200;
+  const trimmed = trimToContext(apiMessages, systemPrompt, contextLimit, outputReserve, ratio, serverReserve);
   const sendMessages = [{ role: "system", content: systemPrompt }, ...trimmed.messages];
+  const sentChars = textChars(sendMessages.map(m => m.content));
   const breakdown = {
-    model:b.model, limit:contextLimit, estimated:trimmed.estimated,
-    system:estimateTokens(systemPrompt)+8,
-    conversation:trimmed.messages.reduce((n,m)=>n+estimateTokens(m.content),0),
+    model:b.model, limit:contextLimit, estimated:trimmed.estimated, source:"estimated",
+    windowSource: ctxWindows[b.model] ? "llama-server n_ctx" : "bot setting",
+    summary:summaryText?estimateTokens(summaryText,ratio):0,
+    system:estimateTokens(systemPrompt,ratio)+8-(summaryText?estimateTokens(summaryText,ratio):0),
+    conversation:trimmed.messages.reduce((n,m)=>n+estimateTokens(m.content,ratio),0),
     attachments:imageParts.length*2048,
-    overhead:trimmed.messages.length*8+16,
-    dropped:trimmed.dropped
+    other:trimmed.messages.length*8+16,
+    dropped:trimmed.dropped, compacted:fromIndex, output:0, live:0
   };
-  // Images can be expensive and tokenizer estimates are approximate: keep a larger safety margin.
+  // Image token cost depends on the vision projector; keep a fixed safety margin per image.
   breakdown.estimated += breakdown.attachments;
   lastContext=breakdown; refreshUsage();
   const requestId=uid();
@@ -1229,7 +1851,9 @@ async function send(text, options={}){
     _atlas_context:{conversation_id:c.id,bot_id:b.id,request_id:requestId,queue_job_id:options.queueJobId||null,conversation_title:String(c.title||"").slice(0,200)} };
   req.max_tokens = outputReserve;
   if (b.docs) req.docs_folder = b.docs;  // server.py adds matching document snippets
+  req.atlas_context_flags = { memory: b.useMemory !== false, knowledge: b.useKnowledge !== false };
   // reasoning_content is used only for activity timing; the expandable panel receives a user-facing summary marker from content.
+  let ctxInfo = {}, realUsage = null, totalUsage = null, predictedN = 0, cachedTokens = 0;
   let machine = "", sources = [], reasoning = "", raw = "", stats = "", promptTokens = 0, t0 = performance.now(), tFirst = 0, tThinkEnd = 0, nThink = 0, nOut = 0;
   let phase = status[b.model] === "ready" ? "READING YOUR MESSAGE" : "LOADING MODEL", note = "";
   ctrl = new AbortController();
@@ -1250,6 +1874,7 @@ async function send(text, options={}){
   const secs = from => ((performance.now() - from) / 1000).toFixed(1);
   const draw = () => {
     const n = nThink + nOut, rate = tFirst && n > 2 ? ` // ${(n / ((performance.now() - tFirst) / 1000)).toFixed(1)} tok/s` : "";
+    if (lastContext === breakdown && n) { breakdown.live = n; renderContextMeter(); }
     act.innerHTML = `<span class="pulse" aria-hidden="true"></span><b>${phase}</b><span>${secs(t0)} s${nThink ? ` // thought ${nThink} tokens` : ""}${nOut ? ` // wrote ${nOut} tokens` : ""}${rate}</span>${note ? `<span>${esc(note)}</span>` : ""}`;
   };
   const timer = setInterval(() => {
@@ -1267,6 +1892,8 @@ async function send(text, options={}){
     if (!r.ok) throw new Error((await r.text()).slice(0, 400));
     try { sources = JSON.parse(r.headers.get("X-Atlas-Sources") || "[]"); } catch { sources = []; }
     machine = r.headers.get("X-Atlas-Machine") || "";
+    try { ctxInfo = JSON.parse(r.headers.get("X-Atlas-Context") || "{}") || {}; } catch { ctxInfo = {}; }
+    applyServerContext(breakdown, ctxInfo, b, ratio);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) {
       const { value, done } = await rd.read(); if (done) break;
@@ -1282,7 +1909,14 @@ async function send(text, options={}){
             raw += dl.content;
             if (/<think>/.test(raw) && !/<\/think>/.test(raw)) nThink++; else nOut++;
           }
-          if (j.timings) { promptTokens = Number(j.timings.prompt_n)||promptTokens; stats = `${Math.round(j.timings.predicted_per_second * 10) / 10} tok/s // ${j.timings.predicted_n} tokens // prompt ${j.timings.prompt_n} tokens`; }
+          if (j.usage && typeof j.usage === "object") realUsage = j.usage;
+          if (j.atlas_usage_total && typeof j.atlas_usage_total === "object") totalUsage = j.atlas_usage_total;
+          if (j.timings) {
+            // llama-server: prompt_n counts only newly processed tokens; cache_n tokens were reused. The context holds both.
+            cachedTokens = Number(j.timings.cache_n) || 0; predictedN = Number(j.timings.predicted_n) || predictedN;
+            promptTokens = (Number(j.timings.prompt_n) || 0) + cachedTokens || promptTokens;
+            stats = `${Math.round(j.timings.predicted_per_second * 10) / 10} tok/s // ${j.timings.predicted_n} tokens // prompt ${promptTokens} tokens${cachedTokens ? ` (${cachedTokens} cached)` : ""}`;
+          }
         } catch {}
       }
       if (tFirst) { clearInterval(fastPoll); setStatus("GENERATING", "busy"); }
@@ -1301,7 +1935,7 @@ async function send(text, options={}){
         : `WORKING // summary appears when ready, ${nThink} tokens`;
       if (box.isConnected) $("#log").scrollTop = $("#log").scrollHeight;  // do not scroll another chat
     }
-    phase = "DONE"; act.classList.add("done"); setStatus("READY", "ok"); setActivity("Done","done","Response finished.");
+    phase = "DONE"; act.classList.add("done"); setStatus("READY", "ok"); setActivity("Done","done","Response finished."); { const sc = chat(); if (sc && sc.swarmRun) syncSwarmActivity(sc); }
   } catch (e) {
     if (e.name === "AbortError") { phase = "STOPPED"; act.classList.add("done"); setStatus("STOPPED", "ok"); setActivity("Idle","idle","Request stopped."); }
     else { phase = "ERROR"; note = e.message; act.classList.add("err"); setStatus("ERROR", "err"); setActivity("Failed","failed","Request failed. Retry or change model.","error"); }
@@ -1315,11 +1949,15 @@ async function send(text, options={}){
   stats = `${stats ? stats + " // " : ""}${nThink+nOut} tokens // first token ${firstTokenTime === null ? "not received" : firstTokenTime + " s"} // total ${elapsedSeconds.toFixed(1)} s`;
   if (sources.length) stats += ` // docs: ${sources.join(", ")}`;
   if (machine) stats += ` // answered by: ${machine}`;
-  recordUsage((promptTokens||breakdown.estimated)+(nThink+nOut),elapsedSeconds);
+  if (ctxInfo.knowledge_titles && ctxInfo.knowledge_titles.length) stats += ` // library: ${ctxInfo.knowledge_titles.join(", ")}`;
+  if (ctxInfo.memory_count) stats += ` // memory: ${ctxInfo.memory_count}`;
+  const measured = finishContextCount(breakdown, { realUsage, totalUsage, promptTokens, predictedN, cachedTokens, streamed: nThink + nOut, sentChars, ctxInfo, images: imageParts.length });
+  recordUsage(measured.billed, elapsedSeconds);
   box.insertAdjacentHTML("beforeend", `<div class="stats">${esc(stats)}</div>`);
   const doneAt=Date.now(); const replyTime=box.querySelector(".msg-time"); if(replyTime) replyTime.textContent=fmtMsgTime(doneAt);
-  c.messages.push({ role: "assistant", content: answer, reasoningSummary: thinking, model: b.model, stats, at: doneAt }); save();
-  if (swarmRun) { const run = swarmRun; swarmRun = null; startSwarmChats(run); }
+  c.messages.push({ role: "assistant", content: answer, reasoningSummary: thinking, model: b.model, stats, at: doneAt, usage: measured.message }); save();
+  if (box.isConnected) { addMsgActions(userEl, c, c.messages.indexOf(userMsg)); addMsgActions(box, c, c.messages.length - 1); }
+  if (swarmRun) { const run = swarmRun; swarmRun = null; startSwarmChats(run, c.id); }
   liveGen = null;
   if (chat() && chat().id === c.id && !box.isConnected) renderLog();  // chat reopened without the live box: show the saved reply
   $("#send").hidden = false; $("#stop").hidden = true; ctrl = null; poll(); renderQueue(); if(phase === "DONE") drainQueue(); return phase;
@@ -1537,7 +2175,15 @@ $("#teamForm").addEventListener("submit", e => {
 
 $("#usageBtn").onclick=()=>{const p=$("#usagePanel");p.classList.toggle("open");$("#usageBtn").setAttribute("aria-expanded",p.classList.contains("open"));refreshUsage();arrangeInfoPanels(p.classList.contains('open')?'usagePanel':null);};
 $("#usageClose").onclick=()=>{$("#usagePanel").classList.remove("open");$("#usageBtn").setAttribute("aria-expanded","false");arrangeInfoPanels();};
-$("#saveUsageSettings").onclick=()=>{usage.sessionBudget=Math.max(1000,Number($("#sessionBudget").value)||100000);usage.weeklyBudget=Math.max(1000,Number($("#weeklyBudget").value)||500000);saveUsage();refreshUsage();};
+$("#saveUsageSettings").onclick=()=>{usage.sessionBudget=Math.max(1000,Number($("#sessionBudget").value)||100000);usage.weeklyBudget=Math.max(1000,Number($("#weeklyBudget").value)||500000);usage.autoCompactPct=Math.min(98,Math.max(50,Number($("#autoCompactPct").value)||80));saveUsage();refreshUsage();};
+$("#compactNow").onclick=()=>runSlash("/compact");
+$("#memoryBtn").onclick=()=>toggleMemoryPanel();
+$("#memoryClose").onclick=()=>toggleMemoryPanel(false);
+$("#memoryForm").onsubmit=async e=>{e.preventDefault();const t=$("#memoryText").value.trim();if(!t)return;try{await memoryCall({action:"add",text:t});$("#memoryText").value="";$("#memoryStatus").textContent="Saved.";}catch(err){$("#memoryStatus").textContent="NOT SAVED: "+err.message;}};
+$("#memoryEnabled").onchange=async e=>{try{await memoryCall({action:"enable",enabled:e.target.checked});}catch(err){$("#memoryStatus").textContent=err.message;}};
+$("#chatSearch").addEventListener("input",e=>{chatQuery=e.target.value;renderChats();});
+$("#chatSearch").addEventListener("keydown",e=>{if(e.key==="Escape"){e.target.value="";chatQuery="";renderChats();}});
+loadMemory();
 
 /* ---------- wiring ---------- */
 function closeMenu(){ $("#side").classList.remove("open"); $("#menu").setAttribute("aria-expanded","false"); }
@@ -1656,7 +2302,7 @@ if ($("#openOpsConversation")) $("#openOpsConversation").onclick = () => {
   },"*");
   setStatus("OPENING OPERATIONS DIAGNOSTICS","ok");
 };
-$("#form").onsubmit = e => { e.preventDefault(); const t = $("#input").value.trim(); if (!t) return; if(ctrl||queueRunning||queueDrainPromise){ enqueueMessage(t); return; } send(t); };
+$("#form").onsubmit = e => { e.preventDefault(); hideSlashHints(); const t = $("#input").value.trim(); if (!t) return; if(isSlashCommand(t)){ runSlash(t); return; } if(ctrl||queueRunning||queueDrainPromise){ enqueueMessage(t); return; } send(t); };
 $("#log").addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
   const attr=["remove","edit","hold","up","down"].find(k=>b.hasAttribute(`data-queue-${k}`));
@@ -1676,7 +2322,9 @@ $("#log").addEventListener("click",e=>{
 // New chat messages and live replies are appended to #log; keep the waiting messages last.
 new MutationObserver(()=>{const g=$("#queueGhosts"),l=$("#log");if(g&&l&&l.lastElementChild!==g){l.appendChild(g);l.scrollTop=l.scrollHeight;}}).observe($("#log"),{childList:true});
 renderQueue();
-$("#input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#form").requestSubmit(); } });
+$("#input").addEventListener("keydown", e => { if (slashKeydown(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#form").requestSubmit(); } });
+$("#input").addEventListener("input", renderSlashHints);
+$("#input").addEventListener("blur", () => setTimeout(hideSlashHints, 150));
 $("#stop").onclick = () => ctrl && ctrl.abort();
 $("#menu").onclick = e => { const s = $("#side"); s.classList.toggle("open"); e.target.setAttribute("aria-expanded", s.classList.contains("open")); };
 function readDataURL(file){ return new Promise((resolve,reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); }); }
@@ -1684,12 +2332,40 @@ function renderPending(){
   const wrap = $("#files"); wrap.innerHTML = "";
   pending.forEach((f,i) => { const chip = document.createElement("span"); chip.className = "file-chip"; if (f.data) { const img = document.createElement("img"); img.src = f.data; img.alt = f.name; chip.appendChild(img); } const name = document.createElement("span"); name.textContent = f.name; chip.appendChild(name); const x = document.createElement("button"); x.type = "button"; x.textContent = "×"; x.title = "Remove attachment"; x.onclick = () => { pending.splice(i,1); renderPending(); }; chip.appendChild(x); wrap.appendChild(chip); });
 }
+// Vision models read a picture as tokens in proportion to its pixels. A 12 MP photo can fill the whole
+// context window, so shrink anything big to 1568 px on the long side (JPEG) before it is sent. Small files stay as they are.
+const IMG_MAX_SIDE = 1568, IMG_KEEP_BYTES = 1.5*1024*1024;
+async function prepareImage(file){
+  const original = await readDataURL(file);
+  try {
+    const bmp = await createImageBitmap(file), long = Math.max(bmp.width, bmp.height);
+    if (long <= IMG_MAX_SIDE && file.size <= IMG_KEEP_BYTES) { bmp.close && bmp.close(); return original; }
+    const k = Math.min(1, IMG_MAX_SIDE / long), w = Math.max(1, Math.round(bmp.width*k)), h = Math.max(1, Math.round(bmp.height*k));
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0,0,w,h); cx.drawImage(bmp,0,0,w,h); bmp.close && bmp.close();
+    const blob = await new Promise(res => cv.toBlob(res, "image/jpeg", 0.88));
+    if (!blob || blob.size >= file.size && long <= IMG_MAX_SIDE) return original;
+    return await readDataURL(blob);
+  } catch { return original; }
+}
+function addImageFiles(files){
+  return Promise.all(files.map(async f => {
+    if (!["image/png","image/jpeg","image/webp"].includes(f.type)) return;
+    if (f.size > 8*1024*1024) { alert((f.name||"Pasted image") + " is over 8 MB, skipped."); return; }
+    try { pending.push({ name:f.name && f.name !== "image.png" ? f.name : "pasted-" + Date.now() + "." + f.type.split("/")[1], data:await prepareImage(f) }); } catch {}
+  })).then(renderPending);
+}
+$("#input").addEventListener("paste", e => {
+  const files = [...(e.clipboardData?.files||[])].filter(f => f.type.startsWith("image/"));
+  if (!files.length) return;
+  e.preventDefault(); addImageFiles(files);
+});
 $("#attach").onchange = async e => {
   for (const f of e.target.files) {
     if (f.type.startsWith("image/")) {
       if (!["image/png","image/jpeg","image/webp"].includes(f.type)) { alert(f.name + ": use PNG, JPEG or WebP."); continue; }
       if (f.size > 8*1024*1024) { alert(f.name + " is over 8 MB, skipped."); continue; }
-      try { pending.push({ name:f.name, data:await readDataURL(f) }); } catch { alert("Could not read " + f.name); }
+      try { pending.push({ name:f.name, data:await prepareImage(f) }); } catch { alert("Could not read " + f.name); }
     } else {
       if (f.size > 300000) { alert(f.name + " is over 300 KB, skipped."); continue; }
       pending.push({ name:f.name, text:await f.text() });
@@ -2147,7 +2823,7 @@ function renderExecutionLog(logs) {
         </div>
         ${log.parameters ? `<div class="exec-section" style="grid-column:1/-1">
           <div class="exec-section-title">Parameters</div>
-          <div class="exec-code">${Object.entries(log.parameters).map(([k,v]) => \`\${k}: \${JSON.stringify(v)}\`).join('\\n')}</div>
+          <div class="exec-code">${Object.entries(log.parameters).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}</div>
         </div>` : ''}
         ${log.input ? `<div class="exec-section" style="grid-column:1/-1">
           <div class="exec-section-title">Input (first 500 chars)</div>

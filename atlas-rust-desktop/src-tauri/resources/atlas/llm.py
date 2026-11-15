@@ -22,9 +22,9 @@ def _base_url() -> str:
     port = int(config.SETTINGS.get("upstream_port", 8080))
     return f"http://{host}:{port}"
 
-def _request(path: str, payload: dict[str, Any] | None = None, timeout: int | None = None):
+def _request(path: str, payload: dict[str, Any] | None = None, timeout: int | None = None, local_only: bool = False):
     base = _base_url()
-    peer_host, peer_port, _peer = compute_peers.route((payload or {}).get("model"))
+    peer_host, peer_port, _peer = (None, None, None) if local_only else compute_peers.route((payload or {}).get("model"))
     if peer_host:
         base = f"http://{peer_host}:{peer_port}"
     url = base.rstrip("/") + path
@@ -35,7 +35,7 @@ def _request(path: str, payload: dict[str, Any] | None = None, timeout: int | No
         method="POST" if payload is not None else "GET",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout or int(config.SETTINGS.get("llm_timeout", 180))) as response:
+        with urllib.request.urlopen(req, timeout=timeout or int(config.SETTINGS.get("llm_timeout", 600))) as response:
             raw = response.read()
             return json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
@@ -66,6 +66,7 @@ def call_llm(
     json_schema: dict[str, Any] | None = None,
     model: str | None = None,
     timeout: int | None = None,
+    local_only: bool = False,
 ) -> str:
     """Send a prompt and return assistant message content as text.
 
@@ -87,7 +88,7 @@ def call_llm(
             "json_schema": {"name": "atlas_agent_action", "strict": True, "schema": json_schema},
         }
 
-    result = _request("/v1/chat/completions", payload, timeout=timeout)
+    result = _request("/v1/chat/completions", payload, timeout=timeout, local_only=local_only)
     try:
         content = result["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:

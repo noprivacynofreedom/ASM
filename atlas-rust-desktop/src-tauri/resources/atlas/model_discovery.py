@@ -72,6 +72,41 @@ def find_models(dirs, max_depth=3):
     return sorted(((Path(k), v) for k, v in found.items()), key=lambda kv: -kv[1])
 
 
+_NOISE = re.compile(r"^(mmproj|gguf|f16|f32|bf16|fp16|fp32|i1|imatrix|q\d.*|iq\d.*|\d{5}|of|ud)$")
+
+
+def _identity(name):
+    """Lower-case name tokens without quantisation and projector words: 'mmproj-gemma-4-12b-f16' -> {gemma,4,12b}."""
+    return {t for t in re.split(r"[-_.\s]+", name.lower()) if t and not _NOISE.match(t)}
+
+
+def find_mmproj(model_path):
+    """The vision projector (mmproj .gguf) that belongs to a model, or None.
+    Without --mmproj llama-server loads the text part only and every image is ignored or rejected.
+    A projector is used when its name tokens all appear in the model name, or when the folder holds
+    exactly one model and one projector."""
+    folder = Path(model_path).parent
+    try:
+        files = [f for f in folder.iterdir() if f.is_file() and f.name.lower().endswith(".gguf")]
+    except OSError:
+        return None
+    projectors = sorted(f for f in files if "mmproj" in f.name.lower())
+    if not projectors:
+        return None
+    mine = _identity(Path(model_path).name)
+    best, best_score = None, 0
+    for f in projectors:
+        ident = _identity(f.name)
+        if ident and ident <= mine and len(ident) > best_score:
+            best, best_score = f, len(ident)
+    if best:
+        return best
+    models = [f for f in files if "mmproj" not in f.name.lower()]
+    if len(models) == 1 and len(projectors) == 1:
+        return projectors[0]
+    return None
+
+
 def assign_roles(models):
     """Map each role to one model file. Few models: roles share them. Returns {role: path}."""
     if not models:
@@ -140,6 +175,9 @@ def build_config(runtime, roles):
             f"      -m {arg(path)}",
             "      -ngl 99 -c 16384 -fa on -np 1 --jinja",
         ]
+        proj = find_mmproj(path)
+        if proj:
+            lines.append(f"      --mmproj {arg(proj)}")
         if rest:
             lines.append("    aliases: [" + ", ".join(f'"{r}"' for r in rest) + "]")
         lines.append("    ttl: 900")

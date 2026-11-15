@@ -3,10 +3,38 @@
 The Operations > llama-swap tab loads http://127.0.0.1:8091/ui/ instead of :8080. Standard library only.
 ponytail: no websocket upgrade (llama-swap's Realtime playground tab only); SSE and normal requests stream fine.
 """
-import http.client, json, re, subprocess, threading
+import http.client, json, os, re, subprocess, threading
+from urllib.parse import urlparse, parse_qs
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 PROXY_PORT = 8091
+# Atlas Bot Logs page: this script is added to llama-swap's /ui/ page; the data comes from the Atlas task table.
+BOTLOGS_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "atlas_botlogs.js")
+BOTLOGS_TAG = b'<script src="/__atlas/bot-logs.js" defer></script>'
+
+def inject(html):
+    """Add the Bot Logs script to llama-swap's HTML page once."""
+    if BOTLOGS_TAG in html: return html
+    i = html.lower().rfind(b"</body>")
+    return html[:i] + BOTLOGS_TAG + html[i:] if i >= 0 else html + BOTLOGS_TAG
+
+def atlas_route(path):
+    """(status, content type, body) for /__atlas/... paths, else None."""
+    u = urlparse(path)
+    if u.path == "/__atlas/bot-logs.js":
+        try:
+            with open(BOTLOGS_JS, "rb") as f: return 200, "text/javascript; charset=utf-8", f.read()
+        except OSError as e:
+            return 404, "text/plain", str(e).encode()
+    if u.path == "/__atlas/bot-logs.json":
+        q = parse_qs(u.query)
+        try:
+            import atlas_observability as OPS
+            data = OPS.bot_runs((q.get("limit") or ["40"])[0], (q.get("lines") or ["40"])[0])
+            return 200, "application/json", json.dumps(data, ensure_ascii=False).encode()
+        except Exception as e:
+            return 500, "application/json", json.dumps({"error": str(e)[:300]}).encode()
+    return None
 _cache = {}
 
 def _ps(cmd):
@@ -94,7 +122,12 @@ def _handler(host, port):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         def log_message(self, *a): pass
+        def _send(self, status, ctype, data):
+            self.send_response(status); self.send_header("Content-Type", ctype); self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
         def _go(self):
+            own = atlas_route(self.path) if self.command == "GET" else None
+            if own: return self._send(*own)
             n = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(n) if n else None
             hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "connection", "accept-encoding")}
@@ -113,6 +146,9 @@ def _handler(host, port):
                 except Exception:
                     pass  # fall through: unpatched data is still better than an error
                 c.close(); c = http.client.HTTPConnection(host, port, timeout=30); c.request("GET", self.path, None, hdrs); r = c.getresponse()
+            if self.command == "GET" and r.status == 200 and "text/html" in (r.getheader("Content-Type") or "") \
+                    and urlparse(self.path).path.startswith("/ui") and not r.getheader("Content-Encoding"):
+                return self._send(200, r.getheader("Content-Type"), inject(r.read()))
             self.send_response(r.status)
             for k, v in r.getheaders():
                 if k.lower() not in ("transfer-encoding", "connection", "content-length"): self.send_header(k, v)
@@ -146,4 +182,7 @@ if __name__ == "__main__":  # self-check
     assert out["accelerators"][0]["architecture"] == "RDNA 4", out
     assert out["accelerators"][1]["architecture"] == "RDNA 2", out
     assert out["environment"]["kind"] in ("native", "virtual_machine"), out
+    assert inject(b"<html><body><div></div></body></html>").count(b"bot-logs.js") == 1
+    assert inject(inject(b"<body></body>")).count(b"bot-logs.js") == 1
+    assert atlas_route("/__atlas/bot-logs.js")[0] == 200 and atlas_route("/ui/") is None
     print("ok", out["system"], out["environment"])

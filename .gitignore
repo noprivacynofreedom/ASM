@@ -26,6 +26,7 @@ exports/
 /atlas-rust-desktop/src-tauri/resources/atlas/data.json
 /atlas-rust-desktop/src-tauri/resources/atlas/data/
 /atlas-rust-desktop/src-tauri/resources/atlas/logs/
+/atlas-rust-desktop/src-tauri/resources/atlas/.atlas/
 
 # Local-only folders: never commit (bundled Python copy, tools, backups, logs, app data)
 /runtime/
@@ -43,3 +44,7 @@ exports/
 /.atlas-patch-audit/
 *-setup.exe
 *.msi
+
+# Nuitka build venv and the compiled-core staging copy (made by compile_core.py)
+/build-tools/
+/atlas-rust-desktop/src-tauri/core-staging/

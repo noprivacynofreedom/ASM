@@ -76,15 +76,38 @@ Setup steps are in [docs/compute-sharing/LAPTOP-SETUP.md](docs/compute-sharing/L
 
 The Atlas Node tab also has a part for a future paid network. **That part does not work yet.** It needs a gateway that does not exist. Do not expect any of it to do anything.
 
-## Coding swarm (work in progress)
+## Add any MCP server
 
-`agents/` has a separate coding swarm. It is not the `/swarm` chat command. It is scripts that split a coding job between workers. Rules that the code enforces:
+You do not have to wait for me to build an integration. Atlas can use any standard MCP server that runs as a local program (stdio). That covers most servers in the public MCP lists.
 
-- It rejects protected output paths.
-- It runs commands with no shell, and with a time limit of 300 seconds at most.
-- It only talks to your local model endpoint. It never calls a cloud model.
+1. Click **PLUGINS** in the top bar.
+2. Click **+ ADD PLUGIN**.
+3. Fill in the form:
+   - **PLUGIN / SERVER NAME**: any short name, for example `filesystem`.
+   - **EXECUTABLE / COMMAND**: the program. On Windows, write `npx.cmd`, not `npx`. Atlas starts the program without a shell, so it does not find `.cmd` files by itself. `uvx`, `python` and `node` work as they are.
+   - **ARGUMENTS // JSON ARRAY**: the rest of the command line, as a JSON list.
+   - **WORKING DIRECTORY**: leave `{project}`, or give a folder.
+   - **ENVIRONMENT // JSON OBJECT**: API keys and other settings the server needs, for example `{"GITHUB_TOKEN": "..."}`. Atlas stores them in `settings.json` on your PC. The plugin list shows only the key names.
+4. Click **SAVE PLUGIN**.
+5. Click **MCP** in the top bar (MCP Monitor), then click **CHECK SERVERS**. A working server shows as online, with its tools.
 
-`agents/README.md` describes the local API that agents use to report their status to Atlas. That API only listens on `127.0.0.1`.
+Examples:
+
+| Server | Command | Arguments |
+|---|---|---|
+| Files in one folder | `npx.cmd` | `["-y", "@modelcontextprotocol/server-filesystem", "{workspace}"]` |
+| Fetch web pages | `uvx` | `["mcp-server-fetch"]` |
+| A remote server with a URL | `npx.cmd` | `["-y", "mcp-remote", "https://example.com/mcp"]` |
+
+`{workspace}` is the Workspace folder you set in Settings. `{project}` is the Atlas app folder. `{python}` is the Python that ships with Atlas.
+
+Atlas has no URL field. Remote MCP servers (HTTP or SSE) go through a small local bridge such as `mcp-remote`, as in the last example.
+
+An MCP server can read files, run programs and use the network. Only add servers you trust. Each tool call is logged in MCP Monitor.
+
+## Swarm core (closed source)
+
+The swarm orchestration (the `/swarm` planner and pipeline, the coding swarm workers, the dev engine and compute-peer routing) is not in this repo. It is closed source. The installer ships it as compiled Python modules. The list of these files is in [core-files.txt](core-files.txt).
 
 ## What is tested
 
@@ -99,13 +122,15 @@ You need Windows, Git, Node.js, Rust (MSVC toolchain), the Visual Studio C++ Bui
 
 The installer ships its own Python. That Python is **not in this repo**. Make the folder `atlas-rust-desktop/src-tauri/resources/atlas/runtime/python` with a working `python.exe` in it. The backend mostly uses the standard library. Extra packages are in `requirements.txt` and `requirements-knowledge.txt`.
 
-Then run:
+**This repo alone does not build a working app.** The backend imports the swarm core, and the core is not here. See "Swarm core" above. The UI, the Rust shell and the build scripts are here so you can read them, change them and report issues.
+
+The full build runs in the private repo:
 
 ```powershell
 .\build-release.ps1
 ```
 
-It checks the backend, builds the app and an installer, and prints the installer path. It installs nothing by itself. Models are **not** included. You bring your own.
+It checks the backend, compiles the swarm core with Nuitka, builds the app and an installer, and prints the installer path. It installs nothing by itself. Models are **not** included. You bring your own.
 
 ## Where things are
 
@@ -119,8 +144,11 @@ It checks the backend, builds the app and an installer, and prints the installer
 
 ## What is not in this repo
 
-The paid gateway and control plane are not here. The gateway fields in the Atlas Node tab do nothing without them. You do not need them to run Atlas.
+- The swarm core. See "Swarm core" above.
+- The paid gateway and control plane. The gateway fields in the Atlas Node tab do nothing without them. You do not need them to run Atlas.
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT, from 2026-11-15. See [LICENSE](LICENSE).
+
+The first 2 commits (2026-11-10) were published under Apache-2.0. Code from those commits stays under Apache-2.0. See [NOTICE](NOTICE).

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import threading
 import re
 import time
 import uuid
@@ -259,7 +260,7 @@ def _finalize_empty_answer(request, messages, completion, choices, events, host,
         requested_tokens = 2048
     retry["max_tokens"] = max(1024, min(requested_tokens, 4096))
 
-    recovered = _post_completion(host, port, retry)
+    recovered = _complete(host, port, retry)
     return _ensure_text_only(
         recovered,
         "I couldn't produce a complete final answer. Please retry; no private reasoning is displayed.",
@@ -277,8 +278,37 @@ def _tool_call_id(call, used_ids):
     return candidate
 
 
+_USAGE = threading.local()
+
+
+def _complete(host, port, request):
+    """_post_completion plus a running total of usage over all tool rounds of this request."""
+    completion = _post_completion(host, port, request)
+    usage = completion.get("usage") if isinstance(completion, dict) else None
+    total = getattr(_USAGE, "total", None)
+    if isinstance(usage, dict) and total is not None:
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if isinstance(usage.get(key), (int, float)):
+                total[key] = total.get(key, 0) + int(usage[key])
+        total["rounds"] = total.get("rounds", 0) + 1
+    return completion
+
+
 def run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60):
+    """Bounded tool loop. The final completion carries atlas_usage_total: usage summed over every round."""
+    _USAGE.total = {}
+    try:
+        completion, events = _run_tool_loop(request, monitor, record, host, port, max_rounds, tool_timeout)
+    finally:
+        total, _USAGE.total = _USAGE.total, None
+    if isinstance(completion, dict) and total:
+        completion["atlas_usage_total"] = total
+    return completion, events
+
+
+def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60):
     req = dict(request)
+    req.pop("stream_options", None)
     messages = list(req.get("messages") or [])
     events = []
     if not messages or any(not isinstance(item, dict) for item in messages):
@@ -320,7 +350,7 @@ def run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeo
 
     attempted_operations = set()
     for _round_no in range(round_limit):
-        completion = _post_completion(host, port, {**req, "messages": list(messages)})
+        completion = _complete(host, port, {**req, "messages": list(messages)})
         choices = completion.get("choices") if isinstance(completion, dict) else None
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("Upstream returned no completion choices")
@@ -455,7 +485,7 @@ def run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeo
             "Summarize completed work and clearly state anything unfinished."
         ),
     })
-    completion = _post_completion(host, port, {**req, "messages": list(messages)})
+    completion = _complete(host, port, {**req, "messages": list(messages)})
     choices = completion.get("choices") if isinstance(completion, dict) else None
     if not isinstance(choices, list) or not choices:
         raise RuntimeError("Upstream returned no final completion after the MCP tool-round limit")
@@ -483,4 +513,12 @@ def as_sse(completion):
             "finish_reason": choice.get("finish_reason") or "stop",
         }],
     }
+    if isinstance(completion, dict):
+        # Real token numbers for the UI: usage of the final round (= context size) and the sum of all rounds.
+        if isinstance(completion.get("usage"), dict):
+            chunk["usage"] = completion["usage"]
+        if isinstance(completion.get("timings"), dict):
+            chunk["timings"] = completion["timings"]
+        if isinstance(completion.get("atlas_usage_total"), dict):
+            chunk["atlas_usage_total"] = completion["atlas_usage_total"]
     return "data: " + json.dumps(chunk, ensure_ascii=False) + "\n\ndata: [DONE]\n\n"

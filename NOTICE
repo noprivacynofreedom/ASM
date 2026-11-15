@@ -1,4 +1,10 @@
 Atlas Chat
 Copyright 2026 Atlas Chat contributors
 
-Licensed under the Apache License, Version 2.0. See LICENSE.
+Licence history
+- The first 2 commits of this repo (2026-11-10, up to c09c8899) were published under the
+  Apache License, Version 2.0. Code taken from those commits stays under Apache-2.0.
+- From 2026-11-15, new commits in this repo are under the MIT License. See LICENSE.
+
+The swarm orchestration core is not in this repo. It is proprietary, all rights reserved,
+and ships in the installer only in compiled form.
