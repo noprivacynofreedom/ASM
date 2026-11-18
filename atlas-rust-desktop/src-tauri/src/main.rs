@@ -7,7 +7,7 @@ mod telemetry;
 
 use serde::Serialize;
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -22,14 +22,19 @@ struct RuntimeState {
     shutdown_started: AtomicBool,
     shutdown_complete: AtomicBool,
 }
-/// Everything Atlas Chat stores lives under here. With an F: drive it is F:\APP-DEV\data\Atlas Chat
-/// (existing installs keep their data there). A PC with no F: drive uses %LOCALAPPDATA%\atlas-chat\data.
-/// Uninstalling never removes it (nsis/installer.nsi has no delete-data option).
-const F_DATA_ROOT: &str = r"F:\APP-DEV\data\Atlas Chat";
+/// Everything Atlas Chat stores lives under here: %LOCALAPPDATA%\atlas-chat\data.
+/// A private build can name another folder: build-release.ps1 reads "data_root" from
+/// local-build.json (never exported) into ATLAS_BUILD_DATA_ROOT at compile time.
+/// That folder is used only when it already exists, so the same installer on another PC
+/// still uses %LOCALAPPDATA%. Uninstalling never removes the data folder.
+const BUILD_DATA_ROOT: Option<&str> = option_env!("ATLAS_BUILD_DATA_ROOT");
 
 fn data_base() -> PathBuf {
-    if Path::new(r"F:\").exists() {
-        return PathBuf::from(F_DATA_ROOT);
+    if let Some(root) = BUILD_DATA_ROOT.map(str::trim).filter(|r| !r.is_empty()) {
+        let root = PathBuf::from(root);
+        if root.is_dir() {
+            return root;
+        }
     }
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -46,7 +51,9 @@ fn f_data(sub: &str) -> PathBuf {
 /// folder at creation, and child processes inherit TEMP and the engine home.
 fn pin_storage_to_f() {
     let tmp = f_data("tmp");
-    std::fs::create_dir_all(&tmp).expect("Atlas Chat needs its data folder to be writable (F:\\APP-DEV\\data, or %LOCALAPPDATA%\\atlas-chat when there is no F: drive)");
+    std::fs::create_dir_all(&tmp).unwrap_or_else(|e| {
+        panic!("Atlas Chat needs its data folder to be writable: {} ({e})", tmp.display())
+    });
     std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", f_data("webview"));
     std::env::set_var("ATLAS_DEV_ENGINE_HOME", f_data("dev-engine"));
     std::env::set_var("TEMP", &tmp);
@@ -118,6 +125,14 @@ async fn probe_viewer(url: String) -> bool {
 #[tauri::command]
 fn system_metrics() -> telemetry::SystemMetrics {
     telemetry::snapshot()
+}
+
+/// Live GPU load and VRAM. Runs off the UI thread; the Operations page calls it only while visible.
+#[tauri::command]
+async fn gpu_telemetry() -> Result<Vec<telemetry::GpuLive>, String> {
+    tokio::task::spawn_blocking(telemetry::gpu_live)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -365,6 +380,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             health_check,
             system_metrics,
+            gpu_telemetry,
             probe_viewer,
             local_ops_snapshot,
             ops_conversation_diagnostics,

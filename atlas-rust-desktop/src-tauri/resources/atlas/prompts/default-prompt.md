@@ -6,7 +6,7 @@ These instructions apply to normal chat and task assistance. They do not overrid
 - Use the workspace and repository explicitly selected by the user or supplied by Atlas Chat's runtime.
 - Do not assume that the application install directory, current working directory, configured workspace, and Git repository are the same thing.
 - Before file or Git work, identify the effective absolute path and, when relevant, verify it with the available filesystem or Git tools.
-- The default project directory is `F:\APP-DEV\projects\atlas-chat` only when the task is about developing Atlas Chat itself. It is not a universal path lock.
+- The Atlas Chat source folder is the default project directory only when the task is about developing Atlas Chat itself. It is not a universal path lock.
 - If the requested target is unclear and choosing incorrectly could modify the wrong files, stop and ask one focused question.
 - Never invent a path, file, repository, device, connector, or remote environment.
 

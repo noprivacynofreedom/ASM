@@ -33,14 +33,22 @@ WEB SEARCH
 """
 import hashlib
 import html
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+_book_spec = importlib.util.spec_from_file_location("atlas_book_commander", Path(__file__).with_name("book_commander.py"))
+if _book_spec is None or _book_spec.loader is None:
+    raise ImportError("Atlas Commander book tools are missing.")
+book_commander = importlib.util.module_from_spec(_book_spec)
+_book_spec.loader.exec_module(book_commander)
 
 PROTOCOL = "2024-11-05"
 VERSION = "0.4.0"
@@ -163,7 +171,9 @@ def _tool_definitions():
         {"name": "git_diff", "description": "Read-only: git diff of the project root (truncated to 12 KB).", "inputSchema": _schema()},
         {"name": "atlas_list_files", "description": "Alias of list_workspace_files.", "inputSchema": _schema({"relative_path": _PATH, "path": _PATH})},
         *_write_tool_definitions(),
+        *_swarm_tool_definitions(),
         *_web_tool_definitions(),
+        *book_commander.tool_definitions(_schema, _offline()),
         {"name": "atlas_read_file", "description": "Alias of read_workspace_file.", "inputSchema": _schema({"relative_path": _PATH, "path": _PATH})},
     ]
 
@@ -205,13 +215,55 @@ def _web_search(query, limit):
     raise ValueError("Web search is not set up. Set ATLAS_BRAVE_API_KEY (Brave Search API) or ATLAS_SEARXNG_URL (your SearXNG server).")
 
 
+def _readonly():
+    return os.environ.get("ATLAS_COMMANDER_READONLY", "").strip() in ("1", "true", "yes")
+
+
 def _write_tool_definitions():
-    if os.environ.get("ATLAS_COMMANDER_READONLY", "").strip() in ("1", "true", "yes"):
+    if _readonly():
         return []
     props = {"path": _PATH, "content": {"type": "string", "description": "Full UTF-8 text of the file."},
              "overwrite": {"type": "boolean", "description": "Replace the file if it exists. Default false: an existing file is refused."}}
     text = "Write a UTF-8 text file under the project root (max 1 MiB). Creates folders. Refuses existing files unless overwrite=true."
     return [{"name": n, "description": text, "inputSchema": _schema(props, ["path", "content"])} for n in WRITE_TOOLS]
+
+
+def _swarm_tool_definitions():
+    tools = [
+        {
+            "name": "atlas_list_conversations",
+            "description": "List lightweight conversation summaries (from /api/conversations or local data.json fallback) without loading full message histories.",
+            "inputSchema": _schema({
+                "kind": {"type": "string", "enum": ["all", "swarm", "chat"], "description": "Filter by conversation kind (default all)."},
+                "archived": {"type": "string", "enum": ["all", "only", "exclude"], "description": "Filter by archive state (default all)."},
+                "q": {"type": "string", "description": "Optional case-insensitive search substring."},
+                "limit": {"type": "integer", "description": "Max items to return (1-1000, default 50)."},
+                "offset": {"type": "integer", "description": "Pagination offset (default 0)."},
+            }),
+        },
+        {
+            "name": "atlas_swarm_runs",
+            "description": "List lightweight swarm run summaries from /api/ops/swarm/runs?summary=1.",
+            "inputSchema": _schema({
+                "summary": {"type": "boolean", "description": "Omit verbose per-worker log lines/routes (default true)."},
+                "category": {"type": "string", "description": "Optional category filter (code, research, writing, data, design, other)."},
+                "state": {"type": "string", "description": "Optional state filter (queued, running, stalled, done, failed, timeout, cancelled)."},
+                "limit": {"type": "integer", "description": "Max runs to return (1-200, default 40)."},
+                "lines": {"type": "integer", "description": "Max log lines per worker when summary=false (0-200, default 40)."},
+            }),
+        },
+    ]
+    if not _readonly():
+        tools.append({
+            "name": "atlas_archive_item",
+            "description": "Archive or unarchive a conversation or swarm run via the local Atlas server.",
+            "inputSchema": _schema({
+                "kind": {"type": "string", "enum": ["conversation", "swarm_run"], "description": "Target item type."},
+                "item_id": {"type": "string", "description": "Conversation ID or swarm run_id."},
+                "archived": {"type": "boolean", "description": "True to archive, false to unarchive (default true)."},
+            }, ["kind", "item_id"]),
+        })
+    return tools
 
 
 KEY_FILES = [
@@ -254,10 +306,178 @@ def _requested_path(arguments):
     return _plain(arguments.get("path", arguments.get("relative_path")))
 
 
+def _atlas_base_url():
+    """Return the validated loopback Atlas server base URL."""
+    raw = os.environ.get("ATLAS_SERVER_URL", "").strip().rstrip("/")
+    if raw:
+        parsed = urllib.parse.urlparse(raw)
+        if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("ATLAS_SERVER_URL must be a loopback http(s) URL.")
+        return raw
+    port = 8090
+    settings_path = ROOT / "settings.json"
+    if settings_path.is_file():
+        try:
+            cfg = json.loads(settings_path.read_text(encoding="utf-8", errors="replace"))
+            if isinstance(cfg, dict) and isinstance(cfg.get("server_port"), int) and 1 <= cfg["server_port"] <= 65535:
+                port = cfg["server_port"]
+        except (OSError, ValueError):
+            pass
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_json(url, payload):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"User-Agent": "AtlasChat", "Accept": "application/json", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read(1 << 20).decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read(4096).decode("utf-8", errors="replace")
+        try:
+            err = json.loads(body).get("error")
+        except ValueError:
+            err = body or str(exc)
+        raise ValueError(f"Atlas server returned HTTP {exc.code}: {err}") from exc
+
+
+def _summarize_local_chat(chat):
+    """Build a lightweight conversation summary from a raw data.json chat entry."""
+    cid = str(chat.get("id") or "")
+    bot_id = str(chat.get("botId") or "")
+    msgs = chat.get("messages") if isinstance(chat.get("messages"), list) else []
+    is_swarm = bool(
+        chat.get("swarmRun") or chat.get("swarm") or chat.get("swarmRole")
+        or bot_id == "Swarm Lead" or re.match(r"^sw[0-9a-f]{6,}", cid)
+    )
+    kind = "swarm_lead" if (bot_id == "Swarm Lead" or cid.endswith("-final")) else ("swarm" if is_swarm else "chat")
+    raw_title = str(chat.get("title") or "").strip()
+    if not raw_title and msgs:
+        first = next((m for m in msgs if isinstance(m, dict) and m.get("role") == "user"), msgs[0])
+        if isinstance(first, dict):
+            raw_title = str(first.get("content") or "").strip()
+    title = re.sub(r"\s+", " ", raw_title)[:72] or "Untitled"
+    preview = ""
+    if msgs and isinstance(msgs[-1], dict):
+        preview = re.sub(r"\s+", " ", str(msgs[-1].get("content") or "")).strip()[:120]
+    updated = chat.get("updatedAt") or chat.get("updated_at") or chat.get("createdAt")
+    run_id = chat.get("runId") or chat.get("run_id") or (cid.rsplit("-", 1)[0] if is_swarm and "-" in cid else None)
+    summary = {
+        "id": cid, "botId": bot_id, "title": title, "is_swarm": is_swarm, "kind": kind,
+        "createdAt": chat.get("createdAt"), "updatedAt": updated, "message_count": len(msgs),
+        "preview": preview, "status": chat.get("status") or ("done" if is_swarm and msgs else "idle"),
+        "archived": bool(chat.get("archived", False)),
+    }
+    if run_id:
+        summary["run_id"] = run_id
+    return summary
+
+
+def _atlas_list_conversations(arguments):
+    kind = str(arguments.get("kind") or "all").strip().lower()
+    archived = str(arguments.get("archived") or "all").strip().lower()
+    query_text = str(arguments.get("q") or "").strip()
+    if kind not in ("all", "swarm", "chat"):
+        raise ValueError("kind must be one of: all, swarm, chat.")
+    if archived not in ("all", "only", "exclude"):
+        raise ValueError("archived must be one of: all, only, exclude.")
+    try:
+        limit = max(1, min(1000, int(arguments.get("limit") if arguments.get("limit") is not None else 50)))
+        offset = max(0, int(arguments.get("offset") if arguments.get("offset") is not None else 0))
+    except (TypeError, ValueError):
+        raise ValueError("limit and offset must be integers.")
+
+    params = {"kind": kind, "archived": archived, "limit": limit, "offset": offset}
+    if query_text:
+        params["q"] = query_text
+    base_url = _atlas_base_url()
+    try:
+        payload = _get_json(f"{base_url}/api/conversations?{urllib.parse.urlencode(params)}")
+        if isinstance(payload, dict) and isinstance(payload.get("conversations"), list):
+            return {"source": "server", "total": payload.get("total", len(payload["conversations"])), "conversations": payload["conversations"]}
+    except (OSError, ValueError):
+        pass
+
+    data_path = ROOT / "data.json"
+    if not data_path.is_file():
+        raise ValueError(f"Atlas server unreachable at {base_url} and no data.json found in {ROOT}.")
+    try:
+        raw = json.loads(data_path.read_text(encoding="utf-8", errors="replace"))
+    except ValueError as exc:
+        raise ValueError(f"Failed to parse data.json: {exc}") from exc
+    chats = raw.get("chats", []) if isinstance(raw, dict) and isinstance(raw.get("chats"), list) else []
+    q_lower = query_text.lower()
+    items = []
+    for chat in chats:
+        if not isinstance(chat, dict):
+            continue
+        item = _summarize_local_chat(chat)
+        if kind == "swarm" and not item["is_swarm"]:
+            continue
+        if kind == "chat" and item["is_swarm"]:
+            continue
+        if archived == "only" and not item["archived"]:
+            continue
+        if archived == "exclude" and item["archived"]:
+            continue
+        if q_lower and q_lower not in f"{item['title']} {item['preview']} {item['botId']}".lower():
+            continue
+        items.append(item)
+    return {"source": "data.json", "total": len(items), "conversations": items[offset:offset + limit]}
+
+
+def _atlas_swarm_runs(arguments):
+    summary = True if arguments.get("summary") is None else bool(arguments.get("summary"))
+    category = str(arguments.get("category") or "").strip().lower()
+    state_filter = str(arguments.get("state") or "").strip().lower()
+    try:
+        limit = max(1, min(200, int(arguments.get("limit") if arguments.get("limit") is not None else 40)))
+        lines = max(0, min(200, int(arguments.get("lines") if arguments.get("lines") is not None else 40)))
+    except (TypeError, ValueError):
+        raise ValueError("limit and lines must be integers.")
+
+    params = {"summary": "1" if summary else "0", "limit": limit, "lines": lines}
+    if category:
+        params["category"] = category
+    if state_filter:
+        params["state"] = state_filter
+    base_url = _atlas_base_url()
+    try:
+        return _get_json(f"{base_url}/api/ops/swarm/runs?{urllib.parse.urlencode(params)}")
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Failed to fetch swarm runs from {base_url}: {exc}") from exc
+
+
+def _atlas_archive_item(arguments):
+    if _readonly():
+        raise ValueError("Writing is switched off (ATLAS_COMMANDER_READONLY).")
+    kind = str(arguments.get("kind") or "").strip().lower()
+    item_id = str(arguments.get("item_id") or "").strip()
+    archived = True if arguments.get("archived") is None else bool(arguments.get("archived"))
+    if kind not in ("conversation", "swarm_run"):
+        raise ValueError("kind must be 'conversation' or 'swarm_run'.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item_id):
+        raise ValueError("Invalid item_id: expected 1-128 alphanumeric, '_' or '-' characters.")
+    base_url = _atlas_base_url()
+    path = f"/api/conversations/{item_id}/archive" if kind == "conversation" else f"/api/ops/swarm/runs/{item_id}/archive"
+    try:
+        return _post_json(base_url + path, {"archived": archived})
+    except OSError as exc:
+        raise ValueError(f"Atlas server unreachable at {base_url}: {exc}") from exc
+
+
 def call_tool(name, arguments):
     """Return a JSON-serialisable dict. Raise ValueError for bad input (reported as isError)."""
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be an object.")
+
+    if name.startswith("book_"):
+        return book_commander.call_tool(name, arguments, ROOT)
 
     if name == "atlas_project_status":
         return {"project_root": str(ROOT), "files": {item: (ROOT / item).is_file() for item in KEY_FILES}}
@@ -319,7 +539,7 @@ def call_tool(name, arguments):
                 "expected_sha256": expected or None, "verified": (not expected) or expected == digest}
 
     if name in WRITE_TOOLS:
-        if os.environ.get("ATLAS_COMMANDER_READONLY", "").strip() in ("1", "true", "yes"):
+        if _readonly():
             raise ValueError("Writing is switched off (ATLAS_COMMANDER_READONLY).")
         requested = _requested_path(arguments)
         content = arguments.get("content")
@@ -371,6 +591,15 @@ def call_tool(name, arguments):
 
     if name == "git_diff":
         return _git(["diff", "--no-ext-diff", "--", "."])
+
+    if name == "atlas_list_conversations":
+        return _atlas_list_conversations(arguments)
+
+    if name == "atlas_swarm_runs":
+        return _atlas_swarm_runs(arguments)
+
+    if name == "atlas_archive_item":
+        return _atlas_archive_item(arguments)
 
     raise LookupError("Unknown Atlas tool: " + str(name))
 

@@ -57,7 +57,7 @@ INSTALL THE UPGRADE
 Extract this package. Run in PowerShell:
 
   Unblock-File .\Update-Atlas-Rust-Knowledge.ps1
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-Atlas-Rust-Knowledge.ps1 -Project "F:\APP-DEV\projects\atlas-chat"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-Atlas-Rust-Knowledge.ps1 -Project "<project folder>"
 
 The updater expects the exact known Rust Test Build snapshot that was installed
 in the previous step. It backs up managed files and stops if index.html/server.py

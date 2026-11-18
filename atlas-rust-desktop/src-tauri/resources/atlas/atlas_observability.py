@@ -149,7 +149,7 @@ def events(after=0,limit=200,agent_id=None,trace_id=None):
     with LOCK, _db() as c: return [dict(r) for r in c.execute(q,args).fetchall()]
 
 def conversation_activity(conversation_id, after=0, limit=100):
-    """Return only cursor, time, event kind, and severity for one conversation."""
+    """Return bounded event details for the local conversation activity view."""
     conversation_id = str(conversation_id or '').strip()[:128]
     if not conversation_id:
         return []
@@ -157,7 +157,7 @@ def conversation_activity(conversation_id, after=0, limit=100):
     limit = max(1, min(200, int(limit)))
     with LOCK, _db() as c:
         rows = c.execute(
-            'SELECT seq,ts,kind,level FROM events '
+            'SELECT seq,ts,kind,level,bot_id,message,details FROM events '
             'WHERE conversation_id=? AND seq>? ORDER BY seq ASC LIMIT ?',
             (conversation_id, after, limit),
         ).fetchall()
@@ -300,20 +300,40 @@ def cancel_all_tasks(reason="Stopped by /swarm stop"):
             _event(c,row['assigned_agent'],tid,"warn","swarm.cancelled","You stopped the swarm, so this bot stopped.",{"reason":reason},row['trace_id'],conversation_id=row['conversation_id'],bot_id=row['bot_id'])
     return len(ids)
 
+def _routes(c, conversation_id):
+    """Where each step of one swarm chat ran: {stage: [hop, ...]} in order. A hop is
+    {where: pc|lan|cloud, label, model, state: trying|ok|fallback|failed|nokey, note, ts}."""
+    out = {}
+    for r in c.execute("SELECT ts,message,details FROM events WHERE conversation_id=? AND kind='swarm.route' ORDER BY seq ASC LIMIT 200", (conversation_id,)):
+        try: hop = json.loads(r["details"] or "{}")
+        except ValueError: continue
+        if not isinstance(hop, dict): continue
+        hop["ts"] = r["ts"]
+        hops = out.setdefault(r["message"] or "bot", [])
+        # One hop per place: a later state of the same place replaces "trying". "started" keeps the first time,
+        # so the UI can show how long the place took (ts - started).
+        if hops and hops[-1].get("where") == hop.get("where") and hops[-1].get("label") == hop.get("label"):
+            hop["started"] = hops[-1].get("started", hops[-1]["ts"]); hops[-1] = hop
+        else:
+            hop["started"] = r["ts"]; hops.append(hop)
+    return out
+
 def swarm_log(conversation_id, after=0):
     """Plain-language lines for one swarm chat, plus whether its task has finished."""
     conversation_id = str(conversation_id or '').strip()[:128]
     if not conversation_id: return {'lines': [], 'next': 0, 'done': True}
     after = max(0, int(after))
     with LOCK, _db() as c:
-        rows = c.execute("SELECT seq,ts,kind,level,message FROM events WHERE conversation_id=? AND seq>? AND kind LIKE 'swarm.%' AND kind!='swarm.phase' ORDER BY seq ASC LIMIT 200", (conversation_id, after)).fetchall()
+        rows = c.execute("SELECT seq,ts,kind,level,message FROM events WHERE conversation_id=? AND seq>? AND kind LIKE 'swarm.%' AND kind NOT IN ('swarm.phase','swarm.route') ORDER BY seq ASC LIMIT 200", (conversation_id, after)).fetchall()
         ph = c.execute("SELECT message FROM events WHERE conversation_id=? AND kind='swarm.phase' ORDER BY seq DESC LIMIT 1", (conversation_id,)).fetchone()
         task = c.execute("SELECT status,error FROM tasks WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1", (conversation_id,)).fetchone()
+        routes = _routes(c, conversation_id)
     lines = [dict(r) for r in rows]
     return {'lines': lines, 'next': lines[-1]['seq'] if lines else after,
             'done': (task is None) or task['status'] in ('completed', 'failed', 'cancelled'),
             'status': task['status'] if task else 'unknown',
             'phase': ph['message'] if ph else '',
+            'routes': routes,
             'error': (task['error'] or '') if task else ''}
 
 def swarm_result(conversation_id):
@@ -381,14 +401,14 @@ def bot_runs(limit=40, lines=40):
                 order.append(run_id)
             try: payload = json.loads(r["payload"] or "{}")
             except ValueError: payload = {}
-            log = c.execute("SELECT seq,ts,level,message FROM events WHERE conversation_id=? AND kind LIKE 'swarm.%' AND kind!='swarm.phase' "
+            log = c.execute("SELECT seq,ts,level,message FROM events WHERE conversation_id=? AND kind LIKE 'swarm.%' AND kind NOT IN ('swarm.phase','swarm.route') "
                             "ORDER BY seq DESC LIMIT ?", (conv, lines)).fetchall()
             ph = c.execute("SELECT message FROM events WHERE conversation_id=? AND kind='swarm.phase' ORDER BY seq DESC LIMIT 1", (conv,)).fetchone()
             end = now if r["status"] in ("queued", "claimed") else r["updated_at"]
             chat = {"conversation_id": conv, "bot": r["bot_id"] or "bot", "task": str(payload.get("task") or "")[:300],
                     "state": _bot_state(r, now), "status": r["status"], "started": r["created_at"], "updated": r["updated_at"],
                     "seconds": round(max(0.0, end - r["created_at"]), 1), "attempts": r["attempts"], "error": (r["error"] or "")[:500],
-                    "phase": ph["message"] if ph else "", "lines": [dict(x) for x in reversed(log)]}
+                    "phase": ph["message"] if ph else "", "routes": _routes(c, conv), "lines": [dict(x) for x in reversed(log)]}
             run = runs[run_id]
             run["goal"] = run["goal"] or str(payload.get("goal") or "")[:300]
             if r["bot_id"] == "Swarm Lead" and run["lead"] is None: run["lead"] = chat
@@ -404,4 +424,9 @@ def bot_runs(limit=40, lines=40):
         run["archived"] = run["state"] == "done"
         run["category"] = _run_category(run["goal"])
         out.append(run)
-    return {"runs": out, "now": now}
+    try:
+        import cloud_llm
+        cloud = cloud_llm.status()
+    except Exception:
+        cloud = None
+    return {"runs": out, "now": now, "cloud": cloud}

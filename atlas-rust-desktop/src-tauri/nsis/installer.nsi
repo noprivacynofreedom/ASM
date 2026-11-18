@@ -12,8 +12,13 @@ ManifestDPIAwareness PerMonitorV2
 !if "{{compression}}" == "none"
   SetCompress off
 !else
-  ; Set the compression algorithm. We default to LZMA.
-  SetCompressor /SOLID "{{compression}}"
+  ; Solid compression on a 1+ GB payload (zlib) makes makensis single-threaded and slow;
+  ; keep /SOLID only for lzma, and use per-file compression for zlib.
+  !if "{{compression}}" == "lzma"
+    SetCompressor /SOLID "lzma"
+  !else
+    SetCompressor "{{compression}}"
+  !endif
 !endif
 
 ; Keep above !include to stay ahead of any plugin command
@@ -646,6 +651,49 @@ Section WebView2
   ${EndIf}
 SectionEnd
 
+Section VCRedist
+  ; Skip if VC++ 2015-2022 Redistributable (x64) is already installed
+  ${If} ${RunningX64}
+    SetRegView 64
+  ${EndIf}
+  ClearErrors
+  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+  ${If} ${Errors}
+  ${OrIf} $0 <> 1
+    ${If} ${RunningX64}
+      SetRegView 32
+      ClearErrors
+      ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+    ${EndIf}
+  ${EndIf}
+  ${If} ${RunningX64}
+    SetRegView 32
+  ${EndIf}
+
+  ${IfNot} ${Errors}
+  ${AndIf} $0 = 1
+    DetailPrint "VC++ x64 Redistributable already installed; skipping."
+  ${ElseIf} $UpdateMode <> 1
+    Delete "$TEMP\vc_redist.x64.exe"
+    DetailPrint "Downloading VC++ 2015-2022 Redistributable (x64)..."
+    NSISdl::download "https://aka.ms/vs/17/release/vc_redist.x64.exe" "$TEMP\vc_redist.x64.exe"
+    Pop $0
+    ${If} $0 == "success"
+      DetailPrint "Installing VC++ 2015-2022 Redistributable (x64)..."
+      ExecWait '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart' $1
+      Delete "$TEMP\vc_redist.x64.exe"
+      ${If} $1 = 0
+      ${OrIf} $1 = 3010
+        DetailPrint "VC++ 2015-2022 Redistributable (x64) installed."
+      ${Else}
+        DetailPrint "Warning: VC++ x64 Redistributable installer exited with code $1; continuing."
+      ${EndIf}
+    ${Else}
+      DetailPrint "Warning: Could not download VC++ x64 Redistributable ($0). Skipping (offline?)."
+    ${EndIf}
+  ${EndIf}
+SectionEnd
+
 Section Install
   SetOutPath $INSTDIR
 
@@ -748,6 +796,34 @@ Section Install
   ; Auto close this page for passive mode
   ${If} $PassiveMode = 1
     SetAutoClose true
+  ${EndIf}
+SectionEnd
+
+Section PlaywrightChromium
+  ; Skip if Playwright Chromium is already installed under %LOCALAPPDATA%\ms-playwright
+  StrCpy $R1 ""
+  FindFirst $R0 $R1 "$LOCALAPPDATA\ms-playwright\chromium*"
+  FindClose $R0
+  ${If} $R1 != ""
+    DetailPrint "Playwright Chromium already installed; skipping."
+  ${Else}
+    IfFileExists "$INSTDIR\atlas\runtime\python\python.exe" 0 playwright_no_python
+      ExecWait '"$INSTDIR\atlas\runtime\python\python.exe" -c "import playwright"' $0
+      ${If} $0 = 0
+        DetailPrint "Installing Playwright Chromium browser..."
+        ExecWait '"$INSTDIR\atlas\runtime\python\python.exe" -m playwright install chromium' $1
+        ${If} $1 = 0
+          DetailPrint "Playwright Chromium installed."
+        ${Else}
+          DetailPrint "Warning: Playwright Chromium install exited with code $1 (offline?); continuing."
+        ${EndIf}
+      ${Else}
+        DetailPrint "Playwright not importable in bundled Python; skipping Chromium install."
+      ${EndIf}
+      Goto playwright_done
+    playwright_no_python:
+      DetailPrint "Bundled Python not found at $INSTDIR\atlas\runtime\python\python.exe; skipping Playwright Chromium."
+    playwright_done:
   ${EndIf}
 SectionEnd
 

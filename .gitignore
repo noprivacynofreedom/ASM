@@ -13,7 +13,7 @@ exports/
 *.tsbuildinfo
 .pytest_cache/
 
-# The installed app (F:-only install location)
+# The installed app
 /Atlas Chat/
 /app/
 
@@ -48,3 +48,12 @@ exports/
 # Nuitka build venv and the compiled-core staging copy (made by compile_core.py)
 /build-tools/
 /atlas-rust-desktop/src-tauri/core-staging/
+
+# Local scratch, reviews, handoffs, and private license/config files
+/LICENSE.local
+/HANDOFF-COMPUTE-SHARING.md
+/REVIEW-*.md
+/mcp_commander_server.txt
+/.claude/
+/swarm-output/
+/swr-user testing/

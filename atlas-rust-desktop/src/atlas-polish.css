@@ -1,22 +1,22 @@
 ﻿:root {
   color-scheme: dark;
   font-family: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
-  background: #0b0a10;
-  color: #eeeaf7;
+  background: #07050d;
+  color: #eef0fa;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --bg: #0b0a10;
-  --surface: #12111a;
-  --surface-raised: #191723;
-  --surface-hover: #211e2d;
-  --border: rgba(190, 170, 235, .13);
-  --muted: #9690a8;
-  --text: #eeeaf7;
-  --accent: #a78bfa;
-  --accent-strong: #8b5cf6;
-  --success: #55d6a2;
-  --danger: #f17d91;
-  --radius: 15px;
+  --bg: #07050d;
+  --surface: #0e0a18;
+  --surface-raised: #140f22;
+  --surface-hover: #1c1530;
+  --border: rgba(157, 107, 255, .18);
+  --muted: #7d799c;
+  --text: #eef0fa;
+  --accent: #9d6bff;
+  --accent-strong: #6d28d9;
+  --success: #34d399;
+  --danger: #fb7185;
+  --radius: 4px;
 }
 
 * { box-sizing: border-box; }
@@ -183,7 +183,7 @@ select:focus-visible, textarea:focus-visible {
 .node-summary > div {
   min-width: 0;
   padding: 17px 19px;
-  background: linear-gradient(145deg, #191723, #14121c);
+  background: linear-gradient(145deg, #140f22, #14121c);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }

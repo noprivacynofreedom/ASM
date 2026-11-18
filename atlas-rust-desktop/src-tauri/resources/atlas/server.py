@@ -23,6 +23,7 @@ import books
 import book_tools
 import upstream_auth
 import dev_cycle
+import headless_dev
 import knowledge_engine
 import csv
 import atlas_observability as OPS
@@ -31,6 +32,9 @@ import compute_peers
 import compute_page
 import vision_probe
 import context_engine
+import cloud_llm
+import ctx_sync
+import test_suite_mcp
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("ATLAS_DATA_DIR", HERE)
@@ -88,6 +92,10 @@ def workspace_root():
     path = os.path.realpath(os.path.expandvars(os.path.expanduser(raw)))
     return path if os.path.isdir(path) else ""
 
+def sync_project(name=""):
+    """ctxsync project: the name given, else the workspace folder name, else "default"."""
+    return str(name or "").strip() or os.path.basename(workspace_root()) or "default"
+
 def _within(root, candidate):
     """True when candidate resolves to root or something inside it (symlink-safe, case-insensitive on Windows)."""
     root = os.path.normcase(os.path.realpath(root))
@@ -108,6 +116,278 @@ def ensure_bot_workspace(bots_list):
         for bot in bots_list:
             if isinstance(bot, dict) and "id" in bot:
                 bot_workspace_dir(bot["id"])
+
+
+_STATE_CACHE = {
+    "path": None,
+    "mtime_ns": None,
+    "size": None,
+    "data": None,
+    "raw_bytes": None,
+    "ensured_bots": None,
+}
+
+
+def _load_state():
+    """Return parsed data.json using an mtime/size cache under _lock."""
+    with _lock:
+        if not os.path.exists(DATA):
+            _STATE_CACHE.update(path=DATA, mtime_ns=None, size=None, data={}, raw_bytes=b"{}")
+            return {}
+        try:
+            st = os.stat(DATA)
+        except OSError:
+            return {}
+        if (
+            _STATE_CACHE["path"] == DATA
+            and _STATE_CACHE["mtime_ns"] == st.st_mtime_ns
+            and _STATE_CACHE["size"] == st.st_size
+            and _STATE_CACHE["data"] is not None
+        ):
+            return _STATE_CACHE["data"]
+        try:
+            with open(DATA, "rb") as f:
+                raw = f.read()
+            data = json.loads(raw) if raw else {}
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            raw = b"{}"
+            data = {}
+        _STATE_CACHE.update(
+            path=DATA,
+            mtime_ns=st.st_mtime_ns,
+            size=st.st_size,
+            data=data,
+            raw_bytes=raw,
+            ensured_bots=None,
+        )
+        return data
+
+
+def _load_state_raw():
+    """Return cached raw JSON bytes for data.json and its parsed dict."""
+    data = _load_state()
+    with _lock:
+        raw = _STATE_CACHE.get("raw_bytes")
+        if raw is None:
+            raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            _STATE_CACHE["raw_bytes"] = raw
+        return raw, data
+
+
+def _save_state(data):
+    """Persist data.json compactly and atomically under _lock, updating _STATE_CACHE."""
+    os.makedirs(os.path.dirname(DATA), exist_ok=True)
+    serialized = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    with _lock:
+        tmp = DATA + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(serialized)
+        os.replace(tmp, DATA)
+        try:
+            st = os.stat(DATA)
+            _STATE_CACHE.update(
+                path=DATA,
+                mtime_ns=st.st_mtime_ns,
+                size=st.st_size,
+                data=data,
+                raw_bytes=serialized,
+                ensured_bots=None,
+            )
+        except OSError:
+            _STATE_CACHE["data"] = None
+            _STATE_CACHE["raw_bytes"] = None
+
+
+def _ensure_bot_workspace_cached(bots_list):
+    """Ensure bot workspaces only when the bot ID set changes."""
+    if not isinstance(bots_list, list):
+        return
+    bot_ids = tuple(str(b.get("id")) for b in bots_list if isinstance(b, dict) and "id" in b)
+    if _STATE_CACHE.get("ensured_bots") == bot_ids:
+        return
+    ensure_bot_workspace(bots_list)
+    _STATE_CACHE["ensured_bots"] = bot_ids
+
+
+def _message_text(content):
+    """Extract plain text from a string or multimodal content list."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+            elif isinstance(item, str):
+                parts.append(item)
+        return " ".join(parts)
+    return ""
+
+
+def _trim_words(text, max_len):
+    """Trim text cleanly at a word boundary with an ellipsis."""
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rstrip()
+    if " " in cut:
+        head = cut.rsplit(" ", 1)[0]
+        if len(head) >= max_len // 2:
+            cut = head
+    return cut.rstrip(" ,;:-") + "…"
+
+
+def _clean_chat_title(raw_title, messages=None, max_len=64):
+    """Normalize a chat title: single line, no markdown/command noise, word-boundary trimmed."""
+    def _clean_one(val):
+        s = re.sub(r"\s+", " ", str(val or "")).strip()
+        s = re.sub(r"^(?:[#>*-]+\s*)+", "", s)
+        s = re.sub(r"^/(?:hyper)?swarm(?:\s+(?:local|hyper|abliterated))?\s+", "", s, flags=re.I).strip()
+        return s
+
+    text = _clean_one(raw_title)
+    if not text or text.lower() in ("new chat", "untitled", "untitled conversation", "swarm"):
+        for m in (messages or []):
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("role") or "") == "user":
+                cand = _clean_one(_message_text(m.get("content")))
+                if cand:
+                    text = cand
+                    break
+    if not text:
+        return "Untitled chat"
+    return _trim_words(text, max_len)
+
+
+def _message_preview(messages, max_len=120):
+    """Short single-line preview of the latest non-empty message."""
+    for m in reversed(messages or []):
+        if not isinstance(m, dict):
+            continue
+        if str(m.get("role") or "") == "system":
+            continue
+        raw = _message_text(m.get("content"))
+        if not raw:
+            continue
+        cleaned = re.sub(r"```[\s\S]*?```", "[code]", raw)
+        cleaned = re.sub(r"[#*`>_]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned:
+            return _trim_words(cleaned, max_len)
+    return ""
+
+
+def _chat_is_swarm(chat):
+    """Return True when a chat entry represents a swarm run or swarm worker."""
+    if not isinstance(chat, dict):
+        return False
+    cid = str(chat.get("id") or "")
+    bot_id = str(chat.get("botId") or "")
+    kind = str(chat.get("kind") or "")
+    return bool(
+        chat.get("is_swarm")
+        or chat.get("swarm")
+        or chat.get("runId")
+        or chat.get("run_id")
+        or kind.startswith("swarm")
+        or bot_id == "Swarm Lead"
+        or re.match(r"^sw[0-9a-f]{6,}", cid)
+    )
+
+
+def _summarize_chat(chat):
+    """Build a lightweight summary dict for a chat without copying its full messages array."""
+    cid = str(chat.get("id") or "")
+    bot_id = str(chat.get("botId") or "")
+    msgs = chat.get("messages") if isinstance(chat.get("messages"), list) else []
+    is_swarm = _chat_is_swarm(chat)
+    title = _clean_chat_title(chat.get("title"), msgs)
+    if bot_id == "Swarm Lead" or cid.endswith("-final"):
+        kind = "swarm_lead"
+    elif is_swarm:
+        kind = "swarm"
+    else:
+        kind = "chat"
+    updated = chat.get("updatedAt") or chat.get("updated_at") or chat.get("createdAt")
+    run_id = chat.get("runId") or chat.get("run_id")
+    if not run_id and is_swarm and "-" in cid:
+        run_id = cid.rsplit("-", 1)[0]
+    summary = {
+        "id": cid,
+        "botId": bot_id,
+        "title": title,
+        "is_swarm": is_swarm,
+        "kind": kind,
+        "category": OPS._run_category(title) if is_swarm else "chat",
+        "createdAt": chat.get("createdAt"),
+        "updatedAt": updated,
+        "updated_at": updated,
+        "message_count": len(msgs),
+        "preview": _message_preview(msgs),
+        "status": chat.get("status") or ("done" if is_swarm and msgs else "idle"),
+        "archived": bool(chat.get("archived", False)),
+    }
+    if run_id:
+        summary["run_id"] = run_id
+    for opt in ("atomic", "atomicGroupId", "parentChatId", "pinned"):
+        if opt in chat:
+            summary[opt] = chat[opt]
+    return summary
+
+
+def _enrich_swarm_runs(payload, summary_only=False, category="", state_filter=""):
+    """Add clean titles, worker count summaries, manual archive state, and optional filtering to /api/ops/swarm/runs."""
+    runs = payload.get("runs") or []
+    state = _load_state()
+    swarm_archived = state.get("swarm_archived") if isinstance(state, dict) else {}
+    if not isinstance(swarm_archived, dict):
+        swarm_archived = {}
+    out = []
+    for run in runs:
+        run_id = str(run.get("run_id") or "")
+        if category and run.get("category") != category:
+            continue
+        if state_filter and run.get("state") != state_filter:
+            continue
+        chats = run.get("chats") or []
+        counts = {"total": len(chats), "done": 0, "running": 0, "failed": 0, "queued": 0}
+        worker_summaries = []
+        for c in chats:
+            st = c.get("state") or "queued"
+            if st == "done":
+                counts["done"] += 1
+            elif st in ("running", "stalled"):
+                counts["running"] += 1
+            elif st in ("failed", "timeout", "cancelled"):
+                counts["failed"] += 1
+            else:
+                counts["queued"] += 1
+            worker_summaries.append({
+                "conversation_id": c.get("conversation_id"),
+                "bot": c.get("bot"),
+                "state": st,
+                "phase": c.get("phase") or "",
+                "seconds": c.get("seconds") or 0,
+                "task": _trim_words(re.sub(r"\s+", " ", str(c.get("task") or "")).strip(), 120),
+            })
+        item = dict(run)
+        if run_id in swarm_archived:
+            item["archived"] = bool(swarm_archived[run_id])
+            item["manually_archived"] = bool(swarm_archived[run_id])
+        item["title"] = _clean_chat_title(run.get("goal"), max_len=72)
+        item["summary"] = counts
+        item["worker_summaries"] = worker_summaries
+        if summary_only:
+            item["chats"] = [
+                {k: v for k, v in c.items() if k not in ("lines", "routes")}
+                for c in chats
+            ]
+            if isinstance(item.get("lead"), dict):
+                item["lead"] = {k: v for k, v in item["lead"].items() if k not in ("lines", "routes")}
+        out.append(item)
+    return {**payload, "runs": out}
 
 # MCP health is measured by real child processes and MCP JSON-RPC responses.
 from mcp_monitor import MCPMonitor, build_mcp_specs
@@ -373,11 +653,20 @@ def _library_books():
 def _library_load_book(item_id):
     with open(_library_chapters_path(item_id), "r", encoding="utf-8") as f: return json.load(f)
 
+_INDEX_CACHE = {}
+
 def _library_index():
     try:
+        stamp = os.stat(LIBRARY_INDEX)
+        key = (LIBRARY_INDEX, stamp.st_mtime_ns, stamp.st_size)
+        hit = _INDEX_CACHE.get(LIBRARY_INDEX)
+        if hit and hit[0] == key:
+            return hit[1]
         with open(LIBRARY_INDEX, "r", encoding="utf-8") as f:
             value = json.load(f)
-        return value if isinstance(value, dict) else {"items": [], "distillations": []}
+        res = value if isinstance(value, dict) else {"items": [], "distillations": []}
+        _INDEX_CACHE[LIBRARY_INDEX] = (key, res)
+        return res
     except (OSError, ValueError):
         return {"items": [], "distillations": []}
 
@@ -387,6 +676,7 @@ def _save_library_index(value):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(value, f, ensure_ascii=False, indent=2)
     os.replace(tmp, LIBRARY_INDEX)
+    _INDEX_CACHE.pop(LIBRARY_INDEX, None)
 
 def _library_item_path(item_id):
     if not re.fullmatch(r"[a-f0-9]{20}", str(item_id or "")):
@@ -397,6 +687,31 @@ def _library_read_source(item_id):
     with open(_library_item_path(item_id), "r", encoding="utf-8") as f: return f.read()
 
 _RECORDS_CACHE = {}
+
+def _library_index_status():
+    """Fast non-blocking status check for opening the Library dialog (<1 ms). Never builds embeddings synchronously."""
+    index = _library_index()
+    path = LIBRARY_INDEX_FILE
+    embedding_model = str(SETTINGS.get("embedding_model") or "").strip()
+    try:
+        stamp = os.stat(path)
+        key = (stamp.st_mtime_ns, stamp.st_size)
+        hit = _RECORDS_CACHE.get(path)
+        if hit and hit[0] == key:
+            cached = hit[1]
+        else:
+            with open(path, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            _RECORDS_CACHE[path] = (key, cached)
+        if (cached.get("version") == 2
+                and cached.get("source_count") == len(index.get("items", []))
+                and cached.get("distill_count") == len(index.get("distillations", []))
+                and cached.get("embedding_model", "") == embedding_model):
+            return len(cached.get("records", [])), cached.get("mode", "lexical")
+    except (OSError, ValueError, TypeError):
+        pass
+    total_items = len(index.get("items", [])) + len(index.get("distillations", []))
+    return 0, ("ready to index" if total_items else "empty")
 
 def _library_index_records(force=False):
     index=_library_index(); path=LIBRARY_INDEX_FILE
@@ -466,6 +781,12 @@ def _library_distill(payload):
     if not source_chunks: raise ValueError("Selected sources contain no readable text")
     def local_completion(messages,max_tokens):
         request={"model":model,"stream":False,"temperature":0.15,"max_tokens":max_tokens,"messages":messages}
+        if cloud_llm.is_cloud_model(model):
+            result, _machine = cloud_llm.chat_completion(request, timeout=300)
+            answer = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if not isinstance(answer, str) or not answer.strip():
+                raise RuntimeError("Teacher model returned an empty response")
+            return answer.strip()
         conn=http.client.HTTPConnection(UPSTREAM_HOST,UPSTREAM_PORT,timeout=900)
         try:
             conn.request("POST","/v1/chat/completions",body=json.dumps(request).encode("utf-8"),headers=upstream_auth.headers({"Content-Type":"application/json"}))
@@ -561,12 +882,7 @@ def _conversation_diagnostics(conversation_id):
     conversation_id = str(conversation_id or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', conversation_id):
         raise ValueError('Invalid conversation ID')
-    with _lock:
-        try:
-            with open(DATA, 'r', encoding='utf-8') as f:
-                state = json.load(f)
-        except FileNotFoundError:
-            state = {}
+    state = _load_state()
     chats = state.get('chats', []) if isinstance(state, dict) else []
     bots = state.get('bots', []) if isinstance(state, dict) else []
     chat = next((c for c in chats if isinstance(c, dict) and str(c.get('id')) == conversation_id), None)
@@ -608,6 +924,29 @@ _ACTIVITY_LABELS = {
 }
 
 
+def _safe_activity_detail(value, depth=0):
+    """Bound activity data and hide fields that commonly hold credentials."""
+    if depth >= 6:
+        return "[nested data omitted]"
+    if isinstance(value, dict):
+        safe = {}
+        for key, item in list(value.items())[:40]:
+            name = str(key)[:128]
+            normalized = re.sub(r"[^a-z0-9]", "", name.lower())
+            if any(marker in normalized for marker in ("password", "secret", "token", "apikey", "authorization", "credential", "cookie", "privatekey")):
+                safe[name] = "[redacted]"
+            else:
+                safe[name] = _safe_activity_detail(item, depth + 1)
+        return safe
+    if isinstance(value, (list, tuple)):
+        return [_safe_activity_detail(item, depth + 1) for item in value[:80]]
+    if isinstance(value, str):
+        return value[:6000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:1000]
+
+
 def _conversation_activity(conversation_id, after=0, limit=100):
     """Return a redacted, allowlisted event projection for a saved chat."""
     conversation_id = str(conversation_id or '').strip()
@@ -618,12 +957,7 @@ def _conversation_activity(conversation_id, after=0, limit=100):
         limit = max(1, min(100, int(limit)))
     except (TypeError, ValueError):
         raise ValueError('Invalid activity pagination')
-    with _lock:
-        try:
-            with open(DATA, 'r', encoding='utf-8') as f:
-                state = json.load(f)
-        except FileNotFoundError:
-            state = {}
+    state = _load_state()
     chats = state.get('chats', []) if isinstance(state, dict) else []
     if not any(isinstance(chat, dict) and str(chat.get('id')) == conversation_id for chat in chats):
         return None
@@ -639,27 +973,20 @@ def _conversation_activity(conversation_id, after=0, limit=100):
         except (TypeError, ValueError):
             continue
         label, status = label_status
-        # Enhanced: include all available fields for detailed logging
         event = {'seq': seq, 'at': at, 'type': row['kind'],
-                 'label': label, 'status': status}
-        # Add execution details if present
-        if 'bot_id' in row:
-            event['bot_id'] = row.get('bot_id')
-        if 'bot_name' in row:
-            event['bot_name'] = row.get('bot_name')
-        if 'model' in row:
-            event['model'] = row.get('model')
-        if 'message' in row:
-            event['message'] = row.get('message')
-        if 'data' in row:
-            event['data'] = row.get('data')
-        if 'error' in row:
-            event['error'] = row.get('error')
-        # Add performance metrics if present
-        if 'duration_ms' in row:
-            event['duration'] = row.get('duration_ms')
-        if 'tokens' in row:
-            event['tokens'] = row.get('tokens')
+                 'label': label, 'status': status, 'bot_id': row.get('bot_id'),
+                 'message': str(row.get('message') or '')[:2000]}
+        try:
+            detail = json.loads(row.get('details') or '{}')
+        except (TypeError, ValueError):
+            detail = {}
+        event['data'] = _safe_activity_detail(detail if isinstance(detail, dict) else {'value': detail})
+        event['bot_name'] = event['data'].get('bot_name')
+        event['model'] = event['data'].get('model')
+        event['tool'] = event['data'].get('tool')
+        event['server'] = event['data'].get('server')
+        event['error'] = event['data'].get('error')
+        event['duration'] = event['data'].get('adapter_duration_ms') or event['data'].get('duration_ms')
         projected.append(event)
     return {'ok': True, 'events': projected,
             'next_cursor': rows[-1]['seq'] if rows else after}
@@ -760,7 +1087,8 @@ def _prepare_upstream_chat(body, ctx_info, host, port):
     if req.get("stream"):
         opts = req.get("stream_options") if isinstance(req.get("stream_options"), dict) else {}
         req["stream_options"] = {**opts, "include_usage": True}
-    if SETTINGS.get("exact_token_count", True) is not False and isinstance(req.get("messages"), list):
+    # Exact preflight count needs three local HTTP calls; final stream usage stays exact.
+    if SETTINGS.get("exact_token_count", False) is True and isinstance(req.get("messages"), list):
         try:
             exact = context_engine.exact_prompt_tokens(host, port, req.get("model"), req["messages"], _upstream_headers(host, port))
         except Exception:
@@ -803,13 +1131,44 @@ class Handler(BaseHTTPRequestHandler):
             raise BodyError(f"Request body is over the {MAX_BODY_BYTES // (1024 * 1024)} MB limit")
         return self.rfile.read(n) if n else b""
 
-    def _handle_swarm_command(self, goal, messages):
-        """Break a goal into parallel subtasks with assigned agents.
+    def _handle_swarm_command(self, raw_input, messages, mode_override=None):
+        """Break a goal into parallel subtasks with assigned agents across local/hyper/abliterated modes.
 
         Returns a formatted response or None to fall through to normal chat.
         """
-        if goal.strip().lower() == "stop":
+        raw = (raw_input or "").strip()
+        if raw.lower() == "stop":
             return self._send_swarm_text("swarm-stop", _swarm_stop())
+        if not raw or raw.lower() in ("help", "--help", "-h", "?"):
+            help_text = (
+                "**Atlas Swarm / Hyperswarm**\n\n"
+                "Run a multi-agent team across cloud and local models.\n\n"
+                "**Modes:**\n"
+                "- **`hyper`** (or `/hyperswarm <goal>`): Blended Hivemind. Uses free cloud tier APIs (Gemini, Groq, Cerebras, OpenRouter, GitHub) + local models + MCP tools.\n"
+                "- **`local`** (`/swarm local <goal>`): 100% offline local models (coder, mentor, tasks) with zero external network calls.\n"
+                "- **`abliterated`** (`/swarm abliterated <goal>`): Uncensored mode using unrestricted model routing and direct objective prompts.\n\n"
+                "**Examples:**\n"
+                "- `/hyperswarm build a WebSocket sync engine`\n"
+                "- `/swarm local refactor auth middleware`\n"
+                "- `/swarm abliterated audit system security vulnerabilities`\n"
+                "- `/swarm stop` to cancel active runs"
+            )
+            return self._send_swarm_text("swarm-help", help_text)
+
+        mode = mode_override
+        mode_match = re.match(r"^(?:--mode[=:\s]+|mode[=:\s]+)?(local|hyper|hyperswarm|abliterated|uncensored)\b\s*(.*)$", raw, re.I)
+        if mode_match:
+            m = mode_match.group(1).lower()
+            mode = "hyper" if m in ("hyper", "hyperswarm") else ("abliterated" if m in ("abliterated", "uncensored") else "local")
+            goal = mode_match.group(2).strip()
+        else:
+            goal = raw
+            if not mode:
+                mode = "hyper" if (swarm_run.pipeline_wanted("hyper") or cloud_llm.any_free_available()) else "local"
+
+        if not goal:
+            return self._send_swarm_text("swarm-help", f"Please specify a goal for {mode} mode: `/swarm {mode} <goal>`")
+
         # ponytail: simple keyword-based task breakdown. Upgrade if goal parsing becomes bottleneck.
         keywords = set(re.findall(r"[a-z0-9]+", goal.lower()))
         subtasks = []
@@ -836,20 +1195,42 @@ class Handler(BaseHTTPRequestHandler):
 
         # Format response
         subtasks = subtasks[:5]  # Cap at 5 subtasks
-        pipeline = swarm_run.pipeline_wanted()
+        pipeline = swarm_run.pipeline_wanted(mode=mode)
         # Answers are also saved as files: in the Workspace folder when one is set, else in the data folder (outside the install).
         out_dir = os.path.join(workspace_root() or DATA_DIR, "swarm-output")
         # The bots read the Workspace folder (read-only). "" = no Workspace set: the bot chats say how to set one.
-        run = swarm_run.start(goal, subtasks, pipeline=pipeline, out_dir=out_dir, repo_root=workspace_root())
-        response_text = f"**SWARM STARTED: {goal}**\n\nThese bots are working:\n\n"
+        repo_root = workspace_root()
+        run = swarm_run.start(goal, subtasks, pipeline=pipeline, out_dir=out_dir, repo_root=repo_root, mode=mode)
+        clean_goal = _clean_chat_title(goal, max_len=80)
+        mode_label = {
+            "local": "Local (Offline · Zero Cloud)",
+            "hyper": "Hyperswarm (Hivemind · Cloud Free Tier + Local)",
+            "abliterated": "Abliterated (Uncensored · Unrestricted)",
+        }.get(mode, "Hyperswarm")
+        run.update({
+            "title": clean_goal,
+            "category": OPS._run_category(goal),
+            "status": "running",
+            "worker_count": len(subtasks),
+            "mode": mode,
+            "created_at": time.time(),
+        })
+        response_text = f"**Swarm Started [{mode_label}]: {clean_goal}**\n\n"
+        response_text += (
+            f"Workspace (read-only): `{repo_root}`\n\n" if repo_root else
+            "Workspace: **not set** (bots cannot read local files; click **Workspace** to set one).\n\n"
+        )
+        response_text += "**Workers**\n"
         for i, st in enumerate(subtasks, 1):
-            response_text += f"{i}. **{st['agent']}**: {st['task']}\n"
-        if pipeline:
-            response_text += ("\nCloud pipeline is ON. Gemini plans and gives each bot one portion. The bots work on the local model. "
-                              "Gemini combines the answers. Tests run on any code. DeepSeek reviews. The task text leaves this PC for those cloud steps. "
-                              "Open the **Swarm Lead** chat to follow it. The final result posts here when all steps are done.\n")
-        response_text += ("\nEach bot has its own chat. Pick a bot (for example 10x: SDE) and open its newest chat, named Swarm. It shows, in plain words, what that bot is doing right now."
-                          "\nThe bots take turns, because one model runs at a time. Type `/swarm stop` to cancel everything.")
+            task_line = _trim_words(re.sub(r"\s+", " ", st["task"]).strip(), 110)
+            response_text += f"{i}. **{st['agent']}** — {task_line}\n"
+        if mode == "hyper":
+            response_text += "\nHivemind pipeline is **ACTIVE** (Plan → Parallel Cloud/Local Workers → Combine → Test → Review). Open any worker or follow **Swarm Lead** for progress."
+        elif mode == "abliterated":
+            response_text += "\nAbliterated pipeline is **ACTIVE** (Unrestricted model routing and direct objective prompts). Follow progress in worker chats."
+        else:
+            response_text += "\nLocal pipeline is **ACTIVE** (100% local models on this PC/LAN). Open any worker or follow **Swarm Lead** for progress."
+        response_text += "\nType `/swarm stop` to cancel anytime."
         return self._send_swarm_text(run["run_id"], response_text, run)
 
     def _send_swarm_text(self, cid, response_text, swarm=None):
@@ -1022,6 +1403,55 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 return
 
+    def _proxy_cloud_chat(self, request, sources, atlas_context=None):
+        """Run a chat completion on a selected cloud model and return SSE or JSON."""
+        from mcp_chat import as_sse
+        context = atlas_context if isinstance(atlas_context, dict) else {}
+        conversation_id = str(context.get('conversation_id') or '')[:128]
+        bot_id = str(context.get('bot_id') or '')[:128]
+        trace_id = str(context.get('request_id') or '')[:128] or None
+        try:
+            completion, machine = cloud_llm.chat_completion(request)
+            if conversation_id:
+                OPS.record_local_event(conversation_id, bot_id, 'chat.request.completed',
+                    'Chat generation completed on cloud model',
+                    {'request_id': trace_id, 'queue_job_id': context.get('queue_job_id'), 'model': str(request.get('model') or '')[:100]},
+                    'info', trace_id)
+            if request.get("stream", True):
+                payload = as_sse(completion).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.send_header("X-Atlas-Machine", machine)
+                if sources:
+                    self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(x) for x in sources]))
+                ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
+                self.send_header("X-Atlas-Context", json.dumps(ctx_info))
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            else:
+                payload = json.dumps(completion, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("X-Atlas-Machine", machine)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as exc:
+            if conversation_id:
+                OPS.record_local_event(conversation_id, bot_id, 'chat.request.failed',
+                    'Chat generation failed on cloud model',
+                    {'request_id': trace_id, 'error': f'{type(exc).__name__}: {exc}'},
+                    'error', trace_id)
+            code = getattr(exc, "code", None)
+            if not isinstance(code, int) or code < 400 or code >= 600:
+                code = 502
+            return self._send(code, json.dumps({"error": {"message": str(exc)}}))
+
     def _proxy(self, method):
         self._atlas_ctx = {}
         body = self._body() or None
@@ -1051,12 +1481,16 @@ class Handler(BaseHTTPRequestHandler):
                 request = json.loads(body)
                 messages=request.get("messages",[])
                 latest=next((m.get("content","") for m in reversed(messages) if isinstance(m,dict) and m.get("role")=="user" and isinstance(m.get("content"),str)),"")
-                # /swarm command: break goal into subtasks with suggested agents
-                if latest.strip().startswith("/swarm "):
-                    goal=latest.strip()[6:].strip()
-                    if goal:
-                        swarm_response=self._handle_swarm_command(goal, messages)
-                        if swarm_response: return swarm_response
+                # /swarm or /hyperswarm command: break goal into subtasks with suggested agents
+                trimmed_lead = latest.strip()
+                if trimmed_lead.startswith("/hyperswarm"):
+                    rest = trimmed_lead[11:].strip()
+                    swarm_response = self._handle_swarm_command(rest, messages, mode_override="hyper")
+                    if swarm_response: return swarm_response
+                elif trimmed_lead.startswith("/swarm"):
+                    rest = trimmed_lead[6:].strip()
+                    swarm_response = self._handle_swarm_command(rest, messages)
+                    if swarm_response: return swarm_response
                 self._atlas_ctx = _inject_context(request, messages, atlas_context)
                 body=json.dumps(request).encode("utf-8")
             except Exception:
@@ -1068,6 +1502,8 @@ class Handler(BaseHTTPRequestHandler):
                 request = {}
             if not isinstance(request, dict):
                 request = {}
+            if cloud_llm.is_cloud_model(request.get("model")):
+                return self._proxy_cloud_chat(request, sources, atlas_context)
             enabled = request.get("atlas_mcp_tools", SETTINGS.get("mcp_auto_tools", True)) is not False
             status = _MCP.status()
             if enabled and status.get("configured", 0) > 0 and status.get("online", 0) < status.get("configured", 0):
@@ -1133,18 +1569,34 @@ class Handler(BaseHTTPRequestHandler):
                     {'request_id': request_id, 'queue_job_id': atlas_context.get('queue_job_id'), 'http_status': resp.status}, level, request_id)
 
     def do_GET(self):
+        if self.path == "/api/cloud/models":
+            return self._send(200, json.dumps({"ok": True, "enabled": cloud_llm.enabled(), "models": cloud_llm.picker_models()}, ensure_ascii=False))
         if self.path.startswith("/api/context/window"):
             model = (parse_qs(urlparse(self.path).query).get("model") or [""])[0]
             if not model:
                 return self._send(400, json.dumps({"ok": False, "error": "model is required"}))
+            if cloud_llm.is_cloud_model(model):
+                return self._send(200, json.dumps({"ok": True, "model": model, "n_ctx": cloud_llm.context_window(model)}))
             n_ctx = context_engine.context_window(UPSTREAM_HOST, UPSTREAM_PORT, model, headers=_upstream_headers())
             return self._send(200, json.dumps({"ok": True, "model": model, "n_ctx": n_ctx}))
         if self.path == "/api/memory":
             return self._send(200, json.dumps({"ok": True, **context_engine.load_memory(DATA_DIR)}, ensure_ascii=False))
+        if self.path.startswith("/api/sync/status"):
+            project = sync_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
+            try:
+                added = ctx_sync.bridge_memory(DATA_DIR, project, context_engine.load_memory(DATA_DIR)["items"])
+                log = ctx_sync.read_log(DATA_DIR, project)
+            except OSError as exc:
+                return self._send(500, json.dumps({"ok": False, "error": str(exc)}))
+            return self._send(200, json.dumps({"ok": True, "project": project, "dir": ctx_sync.store(DATA_DIR, project),
+                                               "count": len(log), "bridged": added, "recent": log[-30:],
+                                               "context": ctx_sync.read_context(DATA_DIR, project)}, ensure_ascii=False))
         if self.path.startswith("/api/vision"):
             model = (parse_qs(urlparse(self.path).query).get("model") or [""])[0]
             if not model:
                 return self._send(400, json.dumps({"ok": False, "error": "model is required"}))
+            if cloud_llm.is_cloud_model(model):
+                return self._send(200, json.dumps({"ok": True, "model": model, "vision": False}))
             return self._send(200, json.dumps({"ok": True, "model": model,
                                                "vision": vision_probe.probe_vision(UPSTREAM_HOST, UPSTREAM_PORT, model)}))
         # Atlas Swarm observability: real registered agents and persisted events.
@@ -1207,17 +1659,45 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, compute_page.PAGE, "text/html; charset=utf-8")
         if self.path == "/api/compute/peers":
             return self._send(200, json.dumps(compute_peers.peers_status(), ensure_ascii=False))
+        if self.path == "/test-suite":
+            page_path = os.path.join(HERE, "test_suite.html")
+            try:
+                with open(page_path, "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            except OSError:
+                return self._send(404, "test_suite.html not found", "text/plain; charset=utf-8")
+        if urlparse(self.path).path == "/api/test-suite":
+            q = parse_qs(urlparse(self.path).query)
+            try:
+                data = test_suite_mcp.list_suite(
+                    DATA_DIR,
+                    status=(q.get("status") or [None])[0],
+                    run_limit=(q.get("run_limit") or ["30"])[0],
+                )
+                return self._send(200, json.dumps({"ok": True, **data}, ensure_ascii=False))
+            except ValueError as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if urlparse(self.path).path == "/api/ops/swarm/log":
             q = parse_qs(urlparse(self.path).query)
             try:
                 return self._send(200, json.dumps(OPS.swarm_log((q.get("conversation_id") or [""])[0], (q.get("after") or ["0"])[0]), ensure_ascii=False))
             except ValueError as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if urlparse(self.path).path == "/api/ops/swarm/live":
+            # What a swarm step's model is writing now (stage view). In memory only; empty after a restart.
+            q = parse_qs(urlparse(self.path).query)
+            conv = (q.get("conversation_id") or [""])[0][:128]
+            return self._send(200, json.dumps({"now": time.time(), "live": swarm_run.live_get(conv, (q.get("stage") or [""])[0][:32])}, ensure_ascii=False))
         if urlparse(self.path).path == "/api/ops/swarm/runs":
             # Backend truth for the swarm state bar, the activity line and the llama-swap Bot Logs page.
             q = parse_qs(urlparse(self.path).query)
             try:
-                return self._send(200, json.dumps(OPS.bot_runs((q.get("limit") or ["40"])[0], (q.get("lines") or ["40"])[0]), ensure_ascii=False))
+                raw_runs = OPS.bot_runs((q.get("limit") or ["40"])[0], (q.get("lines") or ["40"])[0])
+                summary_only = (q.get("summary") or ["0"])[0] in ("1", "true", "yes")
+                category = (q.get("category") or [""])[0].strip().lower()
+                state_filter = (q.get("state") or [""])[0].strip().lower()
+                enriched = _enrich_swarm_runs(raw_runs, summary_only=summary_only, category=category, state_filter=state_filter)
+                return self._send(200, json.dumps(enriched, ensure_ascii=False))
             except ValueError as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if urlparse(self.path).path == "/api/ops/swarm/result":
@@ -1262,8 +1742,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200,json.dumps({"ok":True,"graph":graph},ensure_ascii=False))
         if self.path == "/api/library/index-status":
             try:
-                records,mode=_library_index_records()
-                return self._send(200,json.dumps({"ok":True,"mode":mode,"chunks":len(records),"embedding_model":SETTINGS.get("embedding_model") or None}))
+                chunks_count, mode = _library_index_status()
+                return self._send(200,json.dumps({"ok":True,"mode":mode,"chunks":chunks_count,"embedding_model":SETTINGS.get("embedding_model") or None}))
             except Exception as exc: return self._send(500,json.dumps({"ok":False,"error":str(exc)}))
         if self.path.startswith("/api/library/student-pack?"):
             try:
@@ -1281,12 +1761,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": True, "distillation": record}))
         if self.path == "/api/library":
             index = _library_index()
-            # Return metadata only; source contents are read on explicit distillation.
-            items = [{k: v for k, v in x.items() if k != "content"} for x in index.get("items", [])]
-            distills = [{k: v for k, v in x.items() if k != "content"} for x in index.get("distillations", [])]
+            # Return lightweight metadata only; source contents & heavy graph arrays are read on demand.
+            heavy_keys = {"content", "concepts", "relationships", "glossary", "questions", "training_examples", "limitations"}
+            items = [{k: v for k, v in x.items() if k != "content"} for x in index.get("items", []) if isinstance(x, dict)]
+            distills = [{k: v for k, v in x.items() if k not in heavy_keys} for x in index.get("distillations", []) if isinstance(x, dict)]
             return self._send(200, json.dumps({"items": items, "distillations": distills}))
         if self.path == "/api/dev-cycle/status":
             return self._send(200, json.dumps(dev_cycle.get_status()))
+        if urlparse(self.path).path.startswith("/api/headless/"):
+            return self._headless_get()
         if self.path.startswith("/v1/"):
             return self._proxy("GET")
         if self.path.split("?")[0] == "/api/workspace":
@@ -1329,14 +1812,74 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"error": str(e)}))
             except Exception as e:
                 return self._send(500, json.dumps({"error": str(e)}))
-        if self.path == "/api/state":
-            with _lock:
-                if os.path.exists(DATA):
-                    with open(DATA, "rb") as f:
-                        data = f.read()
-                        ensure_bot_workspace(json.loads(data).get("bots", []))
-                        return self._send(200, data)
-            return self._send(200, "{}")
+        parsed_url = urlparse(self.path)
+        if parsed_url.path == "/api/state":
+            q = parse_qs(parsed_url.query)
+            summary_only = (q.get("summary") or ["0"])[0] in ("1", "true", "yes")
+            if not summary_only:
+                raw, data = _load_state_raw()
+                if data:
+                    _ensure_bot_workspace_cached(data.get("bots", []))
+                return self._send(200, raw)
+            data = _load_state()
+            if not data:
+                return self._send(200, json.dumps({"bots": [], "chats": [], "summary": True}))
+            _ensure_bot_workspace_cached(data.get("bots", []))
+            chats = data.get("chats", []) if isinstance(data.get("chats"), list) else []
+            slim = {k: v for k, v in data.items() if k != "chats"}
+            slim["chats"] = [_summarize_chat(c) for c in chats if isinstance(c, dict)]
+            slim["summary"] = True
+            return self._send(200, json.dumps(slim, ensure_ascii=False))
+        if parsed_url.path == "/api/conversations":
+            q = parse_qs(parsed_url.query)
+            kind_filter = (q.get("kind") or ["all"])[0].strip().lower()
+            archived_filter = (q.get("archived") or ["all"])[0].strip().lower()
+            query_text = (q.get("q") or [""])[0].strip().lower()
+            try:
+                limit = max(1, min(1000, int((q.get("limit") or ["200"])[0])))
+                offset = max(0, int((q.get("offset") or ["0"])[0]))
+            except ValueError:
+                return self._send(400, json.dumps({"ok": False, "error": "Invalid pagination"}))
+            data = _load_state()
+            chats = data.get("chats", []) if isinstance(data.get("chats"), list) else []
+            items = []
+            for c in chats:
+                if not isinstance(c, dict):
+                    continue
+                item = _summarize_chat(c)
+                if kind_filter == "swarm" and not item["is_swarm"]:
+                    continue
+                if kind_filter == "chat" and item["is_swarm"]:
+                    continue
+                if archived_filter == "only" and not item["archived"]:
+                    continue
+                if archived_filter == "exclude" and item["archived"]:
+                    continue
+                if query_text:
+                    hay = f"{item['title']} {item['preview']} {item['botId']}".lower()
+                    if query_text not in hay:
+                        continue
+                items.append(item)
+            total = len(items)
+            return self._send(200, json.dumps({"ok": True, "total": total, "conversations": items[offset:offset + limit]}, ensure_ascii=False))
+        if parsed_url.path.startswith("/api/conversations/"):
+            conv_id = parsed_url.path.rsplit("/", 1)[-1].strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", conv_id):
+                return self._send(400, json.dumps({"ok": False, "error": "Invalid conversation ID"}))
+            data = _load_state()
+            chats = data.get("chats", []) if isinstance(data.get("chats"), list) else []
+            chat = next((c for c in chats if isinstance(c, dict) and str(c.get("id")) == conv_id), None)
+            if not chat:
+                return self._send(404, json.dumps({"ok": False, "error": "Conversation not found"}))
+            summary = _summarize_chat(chat)
+            enriched = dict(chat)
+            enriched.setdefault("cleanTitle", summary["title"])
+            enriched.setdefault("is_swarm", summary["is_swarm"])
+            enriched.setdefault("kind", summary["kind"])
+            enriched.setdefault("category", summary["category"])
+            enriched.setdefault("message_count", summary["message_count"])
+            enriched.setdefault("archived", summary["archived"])
+            return self._send(200, json.dumps({"ok": True, "conversation": enriched}, ensure_ascii=False))
         if self.path.startswith("/api/ops/agents/") and self.path.endswith("/tasks/claim"):
             parts=self.path.strip("/").split("/")
             if len(parts)!=6 or parts[4]!="tasks": return self._send(404,json.dumps({"error":"Unknown task endpoint"}))
@@ -1374,6 +1917,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"servers": [
                 {"name": row["name"], "state": row["state"], "tools": row["tools"]}
                 for row in status["servers"]]}))
+        if self.path == "/api/approvals":
+            if not self._local_ui_request():
+                return self._send(403, json.dumps({"ok": False, "error": "Approvals only from this PC"}))
+            from mcp_chat import pending_approvals
+            return self._send(200, json.dumps({"ok": True, "pending": pending_approvals()}, ensure_ascii=False))
         if self.path == "/api/mcp/audit":
             with _MCP_AUDIT_LOCK:
                 rows = list(_MCP_AUDIT)
@@ -1429,6 +1977,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, json.dumps({"ok": True, "path": dest, "bytes": len(raw)}))
 
     def do_POST(self):
+        # Reject cross-site browser writes to every local API, including state and settings.
+        if self.headers.get("Origin") and not self._local_ui_request():
+            return self._send(403, json.dumps({"ok": False, "error": "Writes only from Atlas Chat"}))
         try:
             return self._do_post()
         except BodyError as exc:  # unreadable body: answer instead of dropping the connection
@@ -1455,9 +2006,140 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         return True
 
+    def _headless_get(self):
+        """GET /api/headless/status and /api/headless/package?id=..&file=report|claude|patch (Night dev panel)."""
+        if not self._local_ui_request():
+            return self._send(403, json.dumps({"ok": False, "error": "Night dev only from this PC"}))
+        url = urlparse(self.path)
+        if url.path == "/api/headless/status":
+            return self._send(200, json.dumps(headless_dev.status(), ensure_ascii=False))
+        if url.path == "/api/headless/package":
+            q = parse_qs(url.query)
+            text = headless_dev.package_text((q.get("id") or [""])[0], (q.get("file") or ["report"])[0])
+            if text is None:
+                return self._send(404, json.dumps({"ok": False, "error": "No such package file"}))
+            return self._send(200, json.dumps({"ok": True, "text": text}, ensure_ascii=False))
+        return self._send(404, json.dumps({"ok": False, "error": "Unknown endpoint"}))
+
+    def _headless_post(self):
+        """POST /api/headless/start|stop|settings|backlog|item|package|queue. Only from Atlas's own page."""
+        if not self._local_ui_request(post=True):
+            return self._send(403, json.dumps({"ok": False, "error": "Night dev only from this PC"}))
+        try:
+            body = json.loads(self._body() or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("Send a JSON object")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        action = self.path.rsplit("/", 1)[-1]
+        if action == "start":
+            result = headless_dev.start()
+        elif action == "stop":
+            result = headless_dev.stop()
+        elif action == "settings":
+            result = headless_dev.save_settings(body)
+        elif action == "backlog" and body.get("reseed"):
+            items = headless_dev.backlog(headless_dev.find_repo(headless_dev.load_settings()), reseed=True)
+            result = {"ok": True, "count": len(items)}
+        elif action == "backlog":
+            result = headless_dev.add_item(body.get("title"), body.get("detail", ""))
+        elif action == "item":
+            result = headless_dev.set_item(str(body.get("id") or ""), str(body.get("status") or ""))
+        elif action == "package":
+            result = headless_dev.decide_package(str(body.get("id") or ""), body.get("decision"), body.get("note", ""))
+        elif action == "queue":
+            result = headless_dev.dismiss_queued(str(body.get("id") or ""))
+        else:
+            return self._send(404, json.dumps({"ok": False, "error": "Unknown endpoint"}))
+        return self._send(200 if result.get("ok") else 409, json.dumps(result, ensure_ascii=False))
+
+    def _local_ui_request(self, post=False):
+        """Browser writes: only from this PC and Atlas's own page."""
+        if self.client_address[0] not in ("127.0.0.1", "::1"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost", "tauri.localhost"):
+            return False
+        # A cross-site page cannot send application/json without a CORS preflight, which Atlas never allows.
+        return not post or (self.headers.get("Content-Type") or "").startswith("application/json")
+
+    def _test_suite_post(self):
+        """POST /api/test-suite: add, update, delete features or log a test run."""
+        if self.path != "/api/test-suite":
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Test suite writes only from this PC"}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            action = str(payload.get("action") or "").strip().lower()
+            if action == "add":
+                item = test_suite_mcp.add_feature(
+                    DATA_DIR,
+                    title=payload.get("title", ""),
+                    description=payload.get("description", ""),
+                    status=payload.get("status", "queued"),
+                    ticks=payload.get("ticks") or [],
+                    feedback=payload.get("feedback"),
+                    author=payload.get("author", "user"),
+                )
+                result = {"ok": True, "feature": item}
+            elif action == "update":
+                item = test_suite_mcp.update_feature(
+                    DATA_DIR,
+                    feature_id=payload.get("feature_id") or payload.get("id") or "",
+                    status=payload.get("status"),
+                    toggle_tick=payload.get("toggle_tick"),
+                    tick_id=payload.get("tick_id"),
+                    tick_done=payload.get("tick_done"),
+                    add_tick=payload.get("add_tick"),
+                    feedback=payload.get("feedback"),
+                    author=payload.get("author", "user"),
+                    title=payload.get("title"),
+                    description=payload.get("description"),
+                    ticks=payload.get("ticks"),
+                )
+                result = {"ok": True, "feature": item}
+            elif action == "delete":
+                result = {"ok": True, **test_suite_mcp.delete_feature(
+                    DATA_DIR, feature_id=payload.get("feature_id") or payload.get("id") or ""
+                )}
+            elif action == "log_run":
+                run = test_suite_mcp.log_run(
+                    DATA_DIR,
+                    label=payload.get("label", "session"),
+                    summary=payload.get("summary", ""),
+                    kind=payload.get("kind", "test_pass"),
+                    feature_feedback=payload.get("feature_feedback"),
+                    author=payload.get("author", "user"),
+                )
+                result = {"ok": True, "run": run}
+            else:
+                raise ValueError("action must be one of: add, update, delete, log_run")
+            self._send(200, json.dumps(result, ensure_ascii=False))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
     def _do_post(self):
         if self._compute_post():
             return
+        if self._test_suite_post():
+            return
+        if self.path.startswith("/api/approvals/"):
+            if not self._local_ui_request(post=True):
+                return self._send(403, json.dumps({"ok": False, "error": "Approvals only from this PC"}))
+            try:
+                choice = json.loads(self._body() or b"{}").get("decision")
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                choice = None
+            if choice not in ("approve", "deny"):
+                return self._send(400, json.dumps({"ok": False, "error": 'Send {"decision": "approve"} or "deny"'}))
+            from mcp_chat import decide_approval
+            ok = decide_approval(self.path.rsplit("/", 1)[-1], choice == "approve")
+            return self._send(200 if ok else 404, json.dumps({"ok": ok} if ok else {"ok": False, "error": "No pending call with this id"}))
         if self.path == "/api/memory":
             try:
                 payload = json.loads(self._body() or b"{}")
@@ -1465,6 +2147,18 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Expected a JSON object")
                 data = context_engine.memory_action(DATA_DIR, payload)
                 return self._send(200, json.dumps({"ok": True, **data}, ensure_ascii=False))
+            except (ValueError, TypeError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path == "/api/sync/note":
+            if not self._local_ui_request(post=True):
+                return self._send(403, json.dumps({"ok": False, "error": "Shared notes only from this PC"}))
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                row = ctx_sync.note(DATA_DIR, sync_project(payload.get("project")), payload.get("text"),
+                                    "atlas-chat", str(payload.get("kind") or "note"))
+                return self._send(200, json.dumps({"ok": True, "note": row}, ensure_ascii=False))
             except (ValueError, TypeError) as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if self.path == "/api/context/compact":
@@ -1630,6 +2324,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(result))
             except Exception as exc:
                 return self._send(502, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path.startswith("/api/headless/"):
+            return self._headless_post()
         if self.path == "/api/dev-cycle/run":
             result = dev_cycle.start_cycle()
             return self._send(202 if result.get("ok") else 409, json.dumps(result))
@@ -1656,6 +2352,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not server_name or not tool_name or not isinstance(arguments, dict):
                     raise ValueError("Expected server, tool and an arguments object")
 
+                from mcp_chat import approval_gate, denied_message
+                allowed, decision = approval_gate(
+                    server_name, tool_name, arguments,
+                    lambda e: _MCP_AUDIT_RECORDER.record(e, payload))
+                if not allowed:
+                    raise PermissionError(denied_message(tool_name, decision))
                 event = _MCP.call_tool(
                     server_name,
                     tool_name,
@@ -1697,13 +2399,55 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("Expected an object containing bots and chats arrays")
             except (ValueError, UnicodeDecodeError) as e:
                 return self._send(400, json.dumps({"ok": False, "error": str(e)}))
-            os.makedirs(os.path.dirname(DATA), exist_ok=True)
-            with _lock:
-                tmp = DATA + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                os.replace(tmp, DATA)
+            _save_state(data)
             return self._send(200, json.dumps({"ok": True}))
+        if self.path.startswith("/api/conversations/") and self.path.endswith("/archive"):
+            parts = urlparse(self.path).path.strip("/").split("/")
+            if len(parts) != 4 or parts[0] != "api" or parts[1] != "conversations" or parts[3] != "archive":
+                return self._send(404, json.dumps({"ok": False, "error": "Invalid archive path"}))
+            conv_id = parts[2]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", conv_id):
+                return self._send(400, json.dumps({"ok": False, "error": "Invalid conversation ID"}))
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected JSON object")
+                archived = bool(payload.get("archived", True))
+            except (ValueError, UnicodeDecodeError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+            data = _load_state()
+            if not isinstance(data, dict) or not isinstance(data.get("chats"), list):
+                return self._send(404, json.dumps({"ok": False, "error": "Conversation not found"}))
+            chat = next((c for c in data["chats"] if isinstance(c, dict) and str(c.get("id")) == conv_id), None)
+            if not chat:
+                return self._send(404, json.dumps({"ok": False, "error": "Conversation not found"}))
+            chat["archived"] = archived
+            _save_state(data)
+            return self._send(200, json.dumps({"ok": True, "id": conv_id, "archived": archived}))
+        if self.path.startswith("/api/ops/swarm/runs/") and self.path.endswith("/archive"):
+            parts = urlparse(self.path).path.strip("/").split("/")
+            if len(parts) != 6 or parts[:4] != ["api", "ops", "swarm", "runs"] or parts[5] != "archive":
+                return self._send(404, json.dumps({"ok": False, "error": "Invalid archive path"}))
+            run_id = parts[4]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", run_id):
+                return self._send(400, json.dumps({"ok": False, "error": "Invalid run ID"}))
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected JSON object")
+                archived = bool(payload.get("archived", True))
+            except (ValueError, UnicodeDecodeError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+            data = _load_state()
+            if not isinstance(data, dict):
+                data = {}
+            swarm_archived = data.get("swarm_archived")
+            if not isinstance(swarm_archived, dict):
+                swarm_archived = {}
+                data["swarm_archived"] = swarm_archived
+            swarm_archived[run_id] = archived
+            _save_state(data)
+            return self._send(200, json.dumps({"ok": True, "run_id": run_id, "archived": archived}))
         if self.path == "/api/export":
             return self._export()
         if self.path == "/api/workspace":
@@ -1746,6 +2490,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"error": str(e)}))
             except Exception as e:
                 return self._send(500, json.dumps({"error": str(e)}))
+        if self.path.startswith("/v1/chat/completions"):
+            headless_dev.chat_started()  # Night dev pauses while the user chats
+            try:
+                return self._proxy("POST")
+            finally:
+                headless_dev.chat_finished()
         if self.path.startswith("/v1/"):
             return self._proxy("POST")
         return self._send(404, json.dumps({"error": "Unknown endpoint"}))
@@ -1760,6 +2510,16 @@ def create_server():
         import hw_proxy; hw_proxy.start(UPSTREAM_HOST, UPSTREAM_PORT)
     except Exception:
         pass  # the llama-swap tab then uses :8080 directly
+    try:
+        test_suite_mcp.log_run(
+            DATA_DIR,
+            label=f"port-{PORT}",
+            summary="Atlas Chat server started",
+            kind="launch",
+            author="server",
+        )
+    except Exception:
+        pass
     return httpd
 
 

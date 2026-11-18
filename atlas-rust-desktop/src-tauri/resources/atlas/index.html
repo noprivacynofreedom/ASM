@@ -7,18 +7,32 @@
 <link rel="icon" href="/favicon.ico">
 <style>
 :root{
-  --bg:#17131f; --panel:#1f1a2a; --panel2:#282135; --line:#4b3a6b; --accent:#a77bff;
-  --accent2:#ff5fb4; --text:#ece8f5; --muted:#a39bb5; --ok:#3fcf8e; --warn:#f5b041; --bad:#ff5c6c;
+  /* Default: Optik Dark — deep midnight-violet glass + cool ultraviolet + ice-cyan */
+  --bg:#0b0814; --panel:rgba(15,12,26,.92); --panel2:rgba(22,17,37,.94); --line:#322652; --line-bright:#533e87;
+  --accent:#9d74ff; --accent2:#38bdf8; --orchid:#e879f9; --text:#eef0ff; --muted:#8680a6;
+  --ok:#34d399; --warn:#f5b041; --bad:#fb7185;
   --mono:ui-monospace,"Cascadia Code",Consolas,monospace; --sans:"Segoe UI",system-ui,sans-serif;
+  --ease-pop:cubic-bezier(0.34,1.56,0.64,1); --ease-out:cubic-bezier(0.22,1,0.36,1);
+}
+[data-theme="dedsec"]{
+  /* DedSec Dark — deep void obsidian + cool electric ultraviolet + cyber cyan */
+  --bg:#08060e; --panel:rgba(13,9,22,.94); --panel2:rgba(19,14,32,.96); --line:#2d234a; --line-bright:#4d3b7d;
+  --accent:#9d6bff; --accent2:#22d3ee; --orchid:#e84393; --text:#eef0ff; --muted:#7f7a9e;
+  --ok:#3fcf8e; --warn:#f5b041; --bad:#ff5c6c;
 }
 *{box-sizing:border-box}
-/* Atlas purple scrollbar system */
-*{scrollbar-width:thin;scrollbar-color:#9658ed #17131f}
-*::-webkit-scrollbar{width:9px;height:9px}
-*::-webkit-scrollbar-track{background:#17131f}
-*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#c084fc,#7c3aed);border:2px solid #17131f;border-radius:10px}
-*::-webkit-scrollbar-thumb:hover{background:#d8b4fe}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.5 var(--sans)}
+/* Deep ultraviolet scrollbar system */
+*{scrollbar-width:thin;scrollbar-color:#6d4aff #0b0814}
+*::-webkit-scrollbar{width:7px;height:7px}
+*::-webkit-scrollbar-track{background:#090610}
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#9d74ff,#5b21b6);border-radius:4px}
+*::-webkit-scrollbar-thumb:hover{background:#c4a7ff}
+html,body{margin:0;height:100%;overflow:hidden;background-color:var(--bg);background-image:radial-gradient(circle at 14% 8%,rgba(124,58,237,.15) 0%,transparent 38%),radial-gradient(circle at 86% 14%,rgba(56,189,248,.07) 0%,transparent 36%),linear-gradient(rgba(157,116,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(157,116,255,.022) 1px,transparent 1px);background-size:100% 100%,100% 100%,30px 30px,30px 30px;color:var(--text);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+.ico{width:14px;height:14px;stroke:currentColor;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none;display:inline-block;vertical-align:-2px}
+.ico-sm{width:12px;height:12px}
+.reticle,.bot.active,.msg.assistant{position:relative}
+.bot.active::before,.msg.assistant::before{content:"";position:absolute;top:-1px;left:-1px;width:7px;height:7px;border-top:2px solid var(--accent2);border-left:2px solid var(--accent2);pointer-events:none;z-index:2}
+.bot.active::after,.msg.assistant::after{content:"";position:absolute;bottom:-1px;right:-1px;width:7px;height:7px;border-bottom:2px solid var(--accent);border-right:2px solid var(--accent);pointer-events:none;z-index:2}
 /* Selection: interface chrome (bot cards, buttons, headers, badges, chat list) is not selectable, so
    Ctrl+A and drag-select only highlight real content. Conversation text, code and fields stay selectable. */
 body{-webkit-user-select:none;user-select:none;cursor:default}
@@ -28,7 +42,9 @@ button,.btn,.bot,.badge,summary,label{cursor:pointer}
 ::selection{background:var(--accent);color:#fff}
 button,select,textarea,input{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
-.app{display:grid;grid-template-columns:320px 1fr;height:100vh}
+/* The page never scrolls: only #log, the sidebar lists and panels scroll. 100vh can round 1px past the window
+   under Windows display scaling, so the frame uses 100% and hides overflow. See CLAUDE.md section 8. */
+.app{display:grid;grid-template-columns:clamp(232px,26vw,320px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100%;overflow:hidden}
 aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 .brand{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
 .mark{width:30px;height:30px;object-fit:contain;filter:drop-shadow(0 0 8px #9658ed88)}
@@ -49,6 +65,7 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 .btn{background:transparent;border:1px solid var(--line);padding:5px 12px;font-family:var(--mono);font-size:12px;cursor:pointer;border-radius:0}
 .btn:hover{border-color:var(--accent);color:#fff}
 .btn.primary{border-color:var(--accent)}
+#approvals{flex:none;max-height:35vh;overflow:auto;border:1px solid var(--accent);background:var(--panel2);padding:10px 14px;margin:8px 16px}.approval{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0;font:12px var(--mono);overflow-wrap:anywhere}.approval .args{flex-basis:100%;color:var(--muted)}.approval .btn:focus-visible{outline:3px solid var(--accent2);outline-offset:2px}
 .btn.danger:hover{border-color:var(--bad);color:var(--bad)}
 .sec{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px;font:12px var(--mono);color:var(--muted);letter-spacing:1px}
 .scroll{overflow:auto;min-height:0;scrollbar-width:none;-ms-overflow-style:none}.scroll::-webkit-scrollbar{display:none;width:0;height:0}
@@ -68,8 +85,12 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 .tabs{display:flex;gap:4px;padding:6px 12px}
 .tab{flex:1;text-align:center}
 .tab[aria-selected="true"]{border-color:var(--accent2);color:var(--accent2)}
-#swarmBar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 16px;border-bottom:1px solid var(--line);font:11px var(--mono)}
+#swarmBar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;border-bottom:1px solid var(--line);font:11px var(--mono);flex:none;max-height:22vh;overflow:auto}
 #swarmBar[hidden]{display:none}
+.swarm-bar-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.swarm-bar-goal{flex:1 1 180px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
+.swarm-bar-meta{color:var(--muted);white-space:nowrap}
+.swarm-bar-steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
 #swarmBar .st{padding:1px 6px;border:1px solid var(--line);color:var(--muted)}
 #swarmBar .st.done{border-color:var(--ok);color:var(--ok)} #swarmBar .st.now{border-color:var(--warn);color:var(--warn)} #swarmBar .st.bad{border-color:var(--bad);color:var(--bad)}
 .badge.ok{border-color:var(--ok);color:var(--ok)} .badge.busy{border-color:var(--warn);color:var(--warn)} .badge.err{border-color:var(--bad);color:var(--bad)}
@@ -77,9 +98,25 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 .bot .meta b{color:var(--text);font-weight:400}
 .bot .desc{margin:0;padding:4px 10px 8px;font-size:13px;color:var(--muted)}
 #chats{list-style:none;margin:0;padding:0 12px 12px;flex:1 1 40%}
-#chats li{display:flex;border:1px solid transparent}
-#chats li:hover{border-color:var(--line)} #chats li.active{border-color:var(--accent)}
-#chats button.open{flex:1;text-align:left;background:none;border:0;padding:6px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+#chats li{display:flex;align-items:stretch;border:1px solid transparent}
+#chats li:hover{border-color:var(--line);background-color:rgba(167,123,255,.06)} #chats li.active{border-color:var(--accent);background-color:rgba(167,123,255,.09)}
+#chats li.chat-group-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 6px 4px;font:600 10px var(--mono);letter-spacing:1px;color:var(--muted);border:0!important;background:none!important}
+#chats li.chat-group-hdr .cnt{font-weight:400;opacity:.75}
+#chats li.chat-group-hdr.arch-hdr{padding:8px 0 2px}
+#chats button.arch-toggle{flex:1;display:flex;align-items:center;justify-content:space-between;gap:6px;background:none;border:0;border-top:1px dashed var(--line);padding:6px;font:600 10px var(--mono);letter-spacing:1px;color:var(--muted);cursor:pointer;text-align:left}
+#chats button.arch-toggle:hover{color:var(--text)}
+#chats button.open{flex:1;min-width:0;text-align:left;background:none;border:0;padding:6px 8px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+#chats li.chat-row button.open{display:flex;flex-direction:column;gap:2px;white-space:normal}
+#chats li.chat-row.archived{opacity:.78}
+#chats .chat-row-top{display:flex;align-items:center;gap:6px;width:100%;min-width:0}
+#chats .chat-row-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--text)}
+#chats .chat-row-time{flex:none;font:10px var(--mono);color:var(--muted)}
+#chats .chat-row-preview{width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted);opacity:.82}
+#chats .chat-badge{flex:none;font:9px var(--mono);border:1px solid var(--line);padding:0 4px;color:var(--muted);letter-spacing:.4px}
+#chats button.pin,#chats button.arch{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;padding:6px 4px;font-size:12px;opacity:.45}
+#chats li:hover button.pin,#chats li:focus-within button.pin,#chats li.pinned button.pin,#chats li:hover button.arch,#chats li:focus-within button.arch{opacity:1}
+#chats li.pinned button.pin{color:var(--accent2)}
+#chats button.pin:hover,#chats button.arch:hover{color:var(--accent)}
 #chats button.del{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px 8px}
 #chats button.del:hover{color:var(--bad)}
 /* SWARM tab: one folder per run. Chip = role, coloured by state. Then the goal text, cut with an ellipsis. */
@@ -96,15 +133,156 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 #chats .swarm-steps li{display:flex;border:1px solid transparent}
 #chats .swarm-steps li:hover{border-color:var(--line)} #chats .swarm-steps li.active{border-color:var(--accent)}
 #chats .swarm-steps button.open{font-size:13px;padding:4px 8px}
+/* Live Swarm status loading bar: translucent left-to-right sweep (green=running, yellow=warn/fallback/stall, red=error). */
+@keyframes atlasSwarmSweep{0%{transform:translateX(-100%)}100%{transform:translateX(220%)}}
+.swarm-status-row{position:relative;overflow:hidden}
+.swarm-status-row::before{content:"";position:absolute;inset:0 auto 0 0;width:var(--swarm-progress,100%);pointer-events:none;z-index:0;transition:width .35s ease,background .25s ease}
+.swarm-status-row::after{content:"";position:absolute;top:0;bottom:0;left:0;width:55%;pointer-events:none;z-index:0;opacity:0}
+.swarm-status-row>*{position:relative;z-index:1}
+.swarm-status-row[data-health="running"]{border-color:rgba(63,207,142,.75)!important;border-left:3px solid var(--ok)!important}
+.swarm-status-row[data-health="running"]::before{background:linear-gradient(90deg,rgba(63,207,142,.18),rgba(63,207,142,.06))}
+.swarm-status-row[data-health="running"]::after{opacity:1;background:linear-gradient(90deg,rgba(63,207,142,0) 0%,rgba(63,207,142,.22) 45%,rgba(63,207,142,.38) 55%,rgba(63,207,142,0) 100%);animation:atlasSwarmSweep 2.1s cubic-bezier(.4,0,.2,1) infinite}
+.swarm-status-row[data-health="warn"]{border-color:rgba(245,176,65,.85)!important;border-left:3px solid var(--warn)!important}
+.swarm-status-row[data-health="warn"]::before{background:linear-gradient(90deg,rgba(245,176,65,.20),rgba(245,176,65,.07))}
+.swarm-status-row[data-health="warn"]::after{opacity:1;background:linear-gradient(90deg,rgba(245,176,65,0) 0%,rgba(245,176,65,.24) 45%,rgba(245,176,65,.42) 55%,rgba(245,176,65,0) 100%);animation:atlasSwarmSweep 2.8s ease-in-out infinite}
+.swarm-status-row[data-health="bad"]{border-color:rgba(255,92,108,.9)!important;border-left:3px solid var(--bad)!important;background:rgba(255,92,108,.06)}
+.swarm-status-row[data-health="bad"]::before{background:linear-gradient(90deg,rgba(255,92,108,.24),rgba(255,92,108,.08))}
+.swarm-status-row[data-health="bad"]::after{opacity:1;background:linear-gradient(90deg,rgba(255,92,108,0) 0%,rgba(255,92,108,.28) 50%,rgba(255,92,108,0) 100%);animation:atlasSwarmSweep 1.6s linear infinite}
+.swarm-status-row[data-health="done"]{border-left:3px solid var(--ok)!important;background:linear-gradient(90deg,rgba(63,207,142,.09),transparent 70%)}
+.swarm-status-row[data-health="done"]::before{width:100%;background:rgba(63,207,142,.04)}
+@media (prefers-reduced-motion:reduce){.swarm-status-row::after{animation:none!important;opacity:0!important}}
 #chats li.none{color:var(--muted);font-size:13px;padding:8px;white-space:normal}
 #swarmBar .sep{color:var(--line)}
+/* Uplink rail: where each model of a swarm run answers from, as a line that runs down beside the chat.
+   Cloud = dashed cyan line + ☁, other machine = dotted line + ⇄, this PC = solid line + ⌂. Shape and mark, not only colour. */
+#chatStage{flex:1;display:flex;min-height:0;position:relative}
+#chatStage>#log{flex:1;min-width:0}
+#chatStage>#log[hidden]{display:none}
+/* Stage view: what one swarm step does, live. Takes the place of the log; the rail stays. */
+#stageView{flex:1;min-width:0;overflow:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:14px}
+#stageView[hidden]{display:none}
+#stageView .sv-top{display:flex;align-items:center;gap:12px;font:600 12px var(--mono);letter-spacing:1px;position:sticky;top:-14px;background:var(--bg);padding:6px 0;z-index:1}
+#stageView .sv-top .usage-muted{margin-left:auto;font:10px var(--mono)}
+#stageView .sv-block{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--panel);padding:10px 14px}
+#stageView h3{margin:0 0 2px;font:600 13px var(--mono);letter-spacing:1px;display:flex;align-items:center;gap:10px}
+#stageView h3 .btn{margin-left:auto;padding:2px 8px;font:10px var(--mono)}
+#stageView .help{margin:0 0 8px;color:var(--muted);font-size:13px}
+#stageView .hops{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-wrap:wrap;gap:4px;align-items:center;font:11px var(--mono)}
+#stageView .hop{display:flex;gap:6px;align-items:baseline;border:1px solid var(--line);padding:2px 6px}
+#stageView .hop .m{color:var(--muted);margin-left:4px}
+#stageView .hop[data-where="cloud"]{border-color:#38bdf8;color:#38bdf8} #stageView .hop[data-where="lan"]{border-color:#c084fc;color:#c084fc} #stageView .hop[data-where="pc"]{border-color:var(--ok);color:var(--ok)}
+#stageView .hop[data-state="fallback"],#stageView .hop[data-state="nokey"]{border-style:dashed;opacity:.75}
+#stageView .hop[data-state="failed"]{border-color:var(--bad);color:var(--bad)}
+#stageView .hops .down{color:var(--muted)}
+#stageView .sv-head{font:11px var(--mono);color:var(--muted);margin:0 0 6px;display:flex;align-items:center;gap:6px}
+#stageView .out{font-size:15px;line-height:1.55;overflow-wrap:anywhere}
+#stageView .out.stream>:last-child{display:inline}
+#stageView pre.out{font:12px/1.45 var(--mono);background:#0f0c15;border:1px solid var(--line);padding:10px;white-space:pre-wrap;margin:0}
+#stageView .none{color:var(--muted);font-size:13px;margin:0}
+#stageView details{margin-top:8px} #stageView details>summary{cursor:pointer;font:11px var(--mono);color:var(--muted);letter-spacing:.5px}
+#stageView details>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block}
+@media (prefers-reduced-motion:no-preference){.live-dot,#stageView .caret{animation:blink 1s infinite}}
+/* Swarm log timeline */
+.swarm-tl .tl-filters{display:flex;gap:4px;margin-left:auto}
+.swarm-tl .tl-filters .btn{padding:1px 6px;font:10px var(--mono)}
+.swarm-tl .tl-filters .btn[aria-pressed="true"]{border-color:var(--accent2);color:var(--accent2)}
+.swarm-tl .none{color:var(--muted);font-size:13px;padding:8px 12px}
+.tl{list-style:none;margin:0;padding:6px 12px 10px;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.tl-e{display:grid;grid-template-columns:auto 14px 1fr;column-gap:8px;align-items:baseline;padding:3px 6px;border-left:2px solid transparent}
+.tl-e time{font:10px var(--mono);color:var(--muted);white-space:nowrap}
+.tl-e .tl-mark{font:11px var(--mono);color:var(--muted);text-align:center}
+.tl-e .tl-who{grid-column:3;justify-self:start;font:600 10px var(--mono);letter-spacing:.5px;border:1px solid currentColor;padding:0 5px;margin:4px 0 2px}
+.tl-e .tl-text,.tl-e details{grid-column:3;overflow-wrap:anywhere}
+.tl-e.same{padding-top:1px}
+.tl-e.k-quiet{opacity:.6;font-size:13px}
+.tl-e.k-bad{border-left-color:var(--bad);background:#ff5c6c14} .tl-e.k-bad .tl-mark{color:var(--bad)}
+.tl-e.k-warn{border-left-color:var(--warn)} .tl-e.k-warn .tl-mark{color:var(--warn)}
+.tl-e.k-cloud .tl-mark,.tl-e.k-cloud .tl-text{color:#38bdf8}
+.tl-e.k-ok .tl-mark{color:var(--ok)}
+.tl-e details>summary{cursor:pointer}
+.tl-e details{grid-column:3;min-width:0}
+.tl-e details>summary{overflow-wrap:anywhere;color:var(--text)}
+.tl-kind{display:inline-block;margin-right:6px;border:1px solid var(--line);padding:0 4px;color:var(--accent2);font:9px var(--mono);letter-spacing:.4px;vertical-align:1px}
+.tl-e details>summary:focus-visible,.tl-stage button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tl-stage-group{border:1px solid var(--line);background:var(--panel2);margin:5px 0 8px}
+.tl-stage-group>details>summary{display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 10px;color:var(--accent);font:600 11px var(--mono);letter-spacing:.6px;list-style:disclosure-closed}
+.tl-stage-group>details[open]>summary{border-bottom:1px solid var(--line);list-style:disclosure-open}
+.tl-stage-group .tl-open-stage{margin:7px 10px 2px;border:1px solid var(--line);background:transparent;color:var(--muted);padding:3px 7px;font:10px var(--mono);cursor:pointer}
+.tl-stage-group .tl-open-stage:hover{border-color:var(--accent);color:var(--text)}
+.tl-nested{margin:6px 0 4px 10px;padding:8px 10px;border-left:3px solid var(--accent);border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:#100d16;font:12px/1.5 var(--mono);overflow-wrap:anywhere}
+.tl-nested pre{background:#201c27;border:1px solid #34303b;border-radius:6px;padding:8px 10px;overflow:auto;white-space:pre-wrap}
+.tl-md{margin-top:4px;min-width:0}
+.tl-stage{margin:10px 0 4px}
+.tl-stage button{all:unset;cursor:pointer;display:block;width:100%;box-sizing:border-box;font:600 11px var(--mono);letter-spacing:1px;color:var(--accent);border-top:1px solid var(--line);padding:6px 6px 2px}
+.tl-stage button::after{content:" · look inside ▸";color:var(--muted);font-weight:400}
+.tl-stage button:hover{color:var(--accent2)}
+.tl-who.w0{color:#38bdf8}.tl-who.w1{color:#f472b6}.tl-who.w2{color:#a3e635}.tl-who.w3{color:#fbbf24}.tl-who.w4{color:#c084fc}.tl-who.w5{color:#2dd4bf}
+/* Status bar chips are buttons now */
+#swarmBar button.st{cursor:pointer;background:none;font:inherit}
+#swarmBar button.st:hover{background:var(--panel2)} #swarmBar button.st.sel{background:var(--panel2);outline:1px solid var(--accent2)}
+#swarmBar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#uplinkRail .sum{margin:0 0 10px;font:11px var(--mono)} #uplinkRail .sum .c{color:var(--cloud)} #uplinkRail .sum .l{color:var(--lan)} #uplinkRail .sum .p{color:var(--pc)} #uplinkRail .sum .w{color:var(--warn)} #uplinkRail .sum .x{color:var(--bad)}
+#uplinkRail .note{margin:0 0 10px;font-size:11px;color:var(--warn);line-height:1.4}
+#uplinkRail .hop .t{color:var(--muted);margin-right:2px}
+#uplinkRail .stn.me>.name button{color:var(--accent2)}
+#uplinkRail{--cloud:#38bdf8;--lan:#c084fc;--pc:var(--ok);flex:0 0 232px;overflow:auto;border-left:1px solid var(--line);background:var(--panel);padding:10px 10px 16px;font:11px var(--mono);color:var(--muted)}
+#uplinkRail[hidden]{display:none}
+#uplinkRail h2{margin:0 0 8px;font:600 11px var(--mono);letter-spacing:1px;color:var(--text);display:flex;align-items:center;gap:6px}
+#uplinkRail h2 .x{margin-left:auto;background:none;border:1px solid var(--line);color:var(--muted);font:11px var(--mono);cursor:pointer;padding:0 6px}
+#uplinkRail h2 .x:hover,#uplinkRail h2 .x:focus-visible{color:var(--text);border-color:var(--accent)}
+#uplinkRail .keys{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 12px}
+#uplinkRail .key{border:1px solid var(--line);padding:1px 5px}
+#uplinkRail .key.on{border-color:var(--cloud);color:var(--cloud)} #uplinkRail .key.off{border-style:dashed}
+#uplinkRail ol{list-style:none;margin:0;padding:0}
+#uplinkRail .stn{position:relative;padding:0 0 12px 18px}
+#uplinkRail .stn::before{content:"";position:absolute;left:4px;top:12px;bottom:0;border-left:2px solid var(--line)}
+#uplinkRail .stn:last-child::before{display:none}
+#uplinkRail .stn[data-where="cloud"]::before{border-left:2px dashed var(--cloud)}
+#uplinkRail .stn[data-where="lan"]::before{border-left:2px dotted var(--lan)}
+#uplinkRail .stn[data-where="pc"]::before{border-left-color:var(--pc)}
+#uplinkRail .node{position:absolute;left:0;top:3px;width:10px;height:10px;border:2px solid var(--line);background:var(--bg);border-radius:50%}
+#uplinkRail .stn.now .node{border-color:var(--warn);background:var(--warn)}
+#uplinkRail .stn.done .node{border-color:var(--ok);background:var(--ok)}
+#uplinkRail .stn.bad .node{border-color:var(--bad);background:var(--bad)}
+#uplinkRail .stn>.name{display:flex;gap:6px;align-items:baseline;color:var(--text);font-weight:600;letter-spacing:.5px}
+#uplinkRail .stn>.name button{all:unset;cursor:pointer;color:var(--text)}
+#uplinkRail .stn>.name button:hover{color:var(--accent2)}
+#uplinkRail .stn>.name button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#uplinkRail .hops{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+#uplinkRail .hop{display:flex;gap:5px;align-items:baseline;border:1px solid var(--line);padding:2px 5px;line-height:1.35;overflow-wrap:anywhere}
+#uplinkRail .hop .ic{flex:none;width:12px;text-align:center}
+#uplinkRail .hop .m{display:block;color:var(--muted);font-size:10px}
+#uplinkRail .hop[data-where="cloud"]{border-color:var(--cloud);color:var(--cloud)}
+#uplinkRail .hop[data-where="lan"]{border-color:var(--lan);color:var(--lan)}
+#uplinkRail .hop[data-where="pc"]{border-color:var(--pc);color:var(--pc)}
+#uplinkRail .hop[data-state="fallback"],#uplinkRail .hop[data-state="nokey"]{border-style:dashed}
+#uplinkRail .hop[data-state="fallback"] .lbl,#uplinkRail .hop[data-state="nokey"] .lbl{text-decoration:line-through}
+#uplinkRail .hop[data-state="ok"],#uplinkRail .hop[data-state="complete"],#uplinkRail .hop[data-state="success"]{border-color:var(--ok);color:var(--ok);border-style:solid;opacity:1}
+#uplinkRail .hop[data-state="trying"],#uplinkRail .hop[data-state="fallback"]{border-color:var(--warn);color:var(--warn)}
+#uplinkRail .hop[data-state="nokey"]{border-color:var(--muted);color:var(--muted)}
+#uplinkRail .hop[data-state="failed"]{border-color:var(--bad);color:var(--bad)}
+#uplinkRail .hop[data-state="ok"] .m,#uplinkRail .hop[data-state="complete"] .m,#uplinkRail .hop[data-state="success"] .m{color:var(--ok)}
+#uplinkRail .hop[data-state="trying"] .m,#uplinkRail .hop[data-state="fallback"] .m{color:var(--warn)}
+#uplinkRail .hop[data-state="failed"] .m{color:var(--bad)}
+#uplinkRail .hop .st{margin-left:auto;flex:none;font-size:10px}
+#uplinkRail .hops .down{color:var(--muted);padding-left:6px;font-size:10px}
+#uplinkRail .sub{margin:6px 0 0;padding:0 0 0 4px}
+#uplinkRail .sub .stn{padding-bottom:8px}
+#uplinkRail .legend{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);display:grid;gap:2px;font-size:10px}
+#uplinkRail .legend .c{color:var(--cloud)} #uplinkRail .legend .l{color:var(--lan)} #uplinkRail .legend .p{color:var(--pc)}
+#uplinkRail .legend .good{color:var(--ok)} #uplinkRail .legend .wait{color:var(--warn)} #uplinkRail .legend .fail{color:var(--bad)}
+#uplinkRail .none{font-size:10px;color:var(--muted);margin-top:2px}
+@media (prefers-reduced-motion:no-preference){#uplinkRail .hop[data-state="trying"] .ic{animation:blink 1s infinite}}
+@media (max-width:820px){#uplinkRail{position:absolute;right:0;top:0;bottom:0;z-index:4;width:min(260px,85vw);box-shadow:-8px 0 16px rgba(0,0,0,.35)}}
+.chip .where{font-size:10px;opacity:.9}
 #swarmBar button.chip{cursor:pointer} #swarmBar button.chip:hover{background:var(--panel2)}
 .backup{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-top:1px solid var(--line)}
 #backupMsg{margin:0;flex-basis:100%;font:11px var(--mono);color:var(--muted);overflow-wrap:anywhere}
 #backupMsg:empty{display:none}
-main{display:flex;flex-direction:column;min-width:0;min-height:0}
+main{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
 #opsPanel,#nodesPanel{display:none;flex-direction:column;min-width:0;min-height:0}
-#opsPanel.active,#nodesPanel.active{display:flex}
+#opsPanel.active,#nodesPanel.active{display:flex;flex:1 1 auto}
 #llama-iframe{width:100%;height:100%;border:none}
 .head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
 .head h1{margin:0;font:600 13px var(--mono);letter-spacing:1px;color:var(--muted)}
@@ -116,13 +294,17 @@ fieldset{border:1px solid var(--line);padding:8px 10px;margin:0;display:flex;fle
 legend{font:11px var(--mono);color:var(--muted);letter-spacing:1px;padding:0 4px}
 fieldset label{flex-direction:row!important;align-items:center;gap:6px;font:14px var(--sans)!important;color:var(--text)!important;letter-spacing:0!important}
 .msg.stage .who{color:var(--accent)}
-#log{flex:1;overflow:auto;padding:20px 16px;display:flex;flex-direction:column;gap:14px}
+#log{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.load-earlier-wrap{display:flex;justify-content:center;padding:2px 0 4px;max-width:920px;width:100%;margin:0 auto}
+.load-earlier-wrap .btn{font-size:11px;padding:4px 12px;color:var(--muted)}
 .msg{max-width:920px;width:100%;margin:0 auto;border:1px solid var(--line);background:var(--panel)}
+.msg.same-sender{margin-top:-4px;border-top-color:color-mix(in srgb,var(--line) 55%,transparent)}
+.msg.same-sender .who{padding:3px 12px;border-bottom-style:dashed;opacity:.85}
 .msg:hover{border-color:var(--accent)}
-.msg .who{display:flex;align-items:center;gap:8px;font:12px var(--mono);color:var(--muted);padding:5px 12px;border-bottom:1px solid var(--line)}
+.msg .who{display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--muted);padding:5px 12px;border-bottom:1px solid var(--line)}
 .msg .who>span:first-child{min-width:0;overflow-wrap:anywhere}.msg .copy-message{margin-left:auto;flex:0 0 auto}
-.msg .msg-time{font-size:11px;color:var(--muted);opacity:0;transition:opacity .12s;white-space:nowrap}.msg:hover .msg-time{opacity:1}
-.msg .msg-receipt{font-size:11px;color:var(--muted);opacity:0;transition:opacity .12s;white-space:nowrap;margin-left:auto}.msg:hover .msg-receipt{opacity:1}.msg .msg-receipt.read{color:var(--accent2)}
+.msg .msg-time{font-size:10px;color:var(--muted);opacity:.65;transition:opacity .12s;white-space:nowrap}.msg:hover .msg-time{opacity:1}
+.msg .msg-receipt{font-size:10px;color:var(--muted);opacity:0;transition:opacity .12s;white-space:nowrap;margin-left:auto}.msg:hover .msg-receipt{opacity:1}.msg .msg-receipt.read{color:var(--accent2)}
 .msg.user .who{color:var(--accent2)}
 /* Waiting (queued) messages are drawn inside the chat, after the last real message. */
 #queueGhosts{display:contents}
@@ -134,9 +316,19 @@ fieldset label{flex-direction:row!important;align-items:center;gap:6px;font:14px
 .queue-strip{display:flex;align-items:center;gap:8px;max-width:920px;width:100%;margin:6px auto 0;font:11px var(--mono);letter-spacing:1px;color:var(--muted)}
 .msg .body{padding:10px 14px;overflow-wrap:anywhere}
 .msg .body p{margin:.4em 0}
-.msg pre{background:#0f0c15;border:1px solid var(--line);padding:10px;overflow:auto;position:relative;font:13px/1.45 var(--mono)}
-.msg code{font-family:var(--mono);background:#0f0c15;padding:1px 4px}
-.msg pre code{background:none;padding:0}
+.msg pre{background:#08050e;border:1px solid var(--line);padding:10px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;position:relative;font:13px/1.45 var(--mono)}
+.msg code{font-family:var(--mono);background:#090611;border:1px solid var(--line);color:var(--accent2);padding:1px 5px;font-size:12.5px}
+.msg pre code{background:none;border:0;color:var(--text);padding:0;font-size:inherit}
+/* Tactical Code Block with line numbers, 2-space vertical indent guide lines & header */
+.tactical-code{margin:8px 0 6px;border:1px solid var(--line-bright,var(--line));background:#08050e;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+.tactical-code-head{display:flex;align-items:center;gap:8px;padding:5px 10px;background:linear-gradient(90deg,rgba(26,19,44,.95),rgba(17,12,29,.95));border-bottom:1px solid var(--line);font:600 10.5px var(--mono);color:var(--text)}
+.tactical-code-head .lang-pill{color:var(--accent2);border:1px solid color-mix(in srgb,var(--accent2) 50%,transparent);background:color-mix(in srgb,var(--accent2) 10%,transparent);padding:0 5px;font-size:9.5px;text-transform:uppercase}
+.tactical-code-head .indent-meta{color:var(--muted);font-size:10px}
+.tactical-code-head .copy{position:static;margin-left:auto;padding:2px 8px;font-size:10px}
+.code-table{display:grid;grid-template-columns:38px minmax(0,1fr);font:12.5px/1.55 var(--mono);overflow-x:auto}
+.code-gutter{padding:8px 6px;text-align:right;color:#574d75;background:#0b0814;border-right:1px solid var(--line);user-select:none!important;-webkit-user-select:none!important}
+.code-gutter span{display:block}
+.tactical-code pre.code-lines{margin:0;padding:8px 12px;border:0;background:transparent;white-space:pre;overflow-wrap:normal;background-image:repeating-linear-gradient(to right,rgba(157,116,255,.18) 0px,rgba(157,116,255,.18) 1px,transparent 1px,transparent 2ch);background-position:12px 0}
 /* Kanban progress board (rendered from a ```kanban block): dark card, coloured status icons only. */
 .msg .kb{background:#171717;border:1px solid #333;border-radius:10px;padding:12px 14px;margin:8px 0;color:#fff}
 .msg .kb-head{font:11px var(--mono);color:#a3a3a3;letter-spacing:.08em;margin-bottom:8px}
@@ -151,14 +343,43 @@ fieldset label{flex-direction:row!important;align-items:center;gap:6px;font:14px
 @keyframes kbspin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.msg .kb-ic.doing{animation:none;background:#facc15}}
 .copy{position:absolute;top:6px;right:6px;font-size:11px;padding:2px 8px}
-details.think{border:1px dashed var(--line);padding:6px 10px;margin:8px 12px 0;color:var(--muted);font-size:13px}
-details.think summary{cursor:pointer;font:12px var(--mono);letter-spacing:1px}
+details.think{border:1px dashed var(--line);padding:5px 10px;margin:8px 12px 0;color:var(--muted);font-size:13px;background:color-mix(in srgb,var(--panel2) 55%,transparent)}
+details.think summary{cursor:pointer;font:11px var(--mono);letter-spacing:.6px;display:flex;align-items:center;gap:6px}
+.think-pill{display:inline-block;border:1px solid var(--line);padding:0 6px;font-size:10px;color:var(--accent)}
+.tl-e.tl-leaf .tl-text{color:var(--text)}
 .think-text{white-space:pre-wrap;max-height:300px;overflow:auto;font:13px/1.5 var(--mono);color:var(--muted);padding-top:6px}
 .activity{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:12px var(--mono);color:var(--muted);padding:6px 12px;border-bottom:1px dashed var(--line)}
 .activity b{color:var(--warn);font-weight:600;letter-spacing:1px}
 .activity .pulse{width:8px;height:8px;background:var(--warn);flex:none}
 .activity.done b{color:var(--ok)} .activity.done .pulse{background:var(--ok)}
 .activity.err b{color:var(--bad)} .activity.err .pulse{background:var(--bad)}
+/* Claude-style collapsible parent-child activity tree inside #log */
+.claude-activity-tree{margin:8px 12px 4px;border:1px solid var(--line-bright,var(--line));background:#090611;box-shadow:0 4px 16px rgba(0,0,0,.4) inset}
+.claude-activity-tree>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:6px 11px;font:600 11px var(--mono);color:var(--text);background:linear-gradient(90deg,rgba(124,58,237,.22),rgba(22,17,37,.74));border-bottom:1px solid var(--line);cursor:pointer}
+.claude-activity-tree>summary::-webkit-details-marker{display:none}
+.claude-activity-tree>summary .caret-ico{color:var(--accent2);transition:transform .15s ease;flex:none}
+.claude-activity-tree[open]>summary .caret-ico{transform:rotate(90deg)}
+.claude-activity-tree>summary .tree-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.claude-activity-tree>summary .tree-badge{padding:1px 6px;font-size:9.5px;border:1px solid var(--warn);color:var(--warn);background:rgba(245,176,65,.1);white-space:nowrap;flex:none}
+.claude-activity-tree.done>summary .tree-badge{border-color:var(--ok);color:var(--ok);background:rgba(52,211,153,.1)}
+.claude-activity-tree.err>summary .tree-badge{border-color:var(--bad);color:var(--bad);background:rgba(251,113,133,.12)}
+.claude-activity-tree>summary .tree-summary-meta{margin-left:auto;font-size:10px;color:var(--muted);white-space:nowrap;flex:none}
+.activity-children{list-style:none;margin:0;padding:6px 12px 8px 22px;position:relative;display:flex;flex-direction:column;gap:0}
+.activity-children::before{content:"";position:absolute;left:15px;top:0;bottom:14px;width:2px;background:linear-gradient(180deg,var(--accent),var(--accent2) 65%,var(--ok))}
+.activity-step{position:relative;padding:5px 0 5px 16px;border-bottom:1px solid rgba(50,38,82,.45)}
+.activity-step:last-child{border-bottom:0;padding-bottom:2px}
+.activity-step::before{content:"";position:absolute;left:-7px;top:14px;width:14px;height:2px;background:var(--line-bright,var(--line))}
+.activity-step::after{content:"";position:absolute;left:-10px;top:11px;width:8px;height:8px;border-radius:50%;background:#090611;border:2px solid var(--ok)}
+.activity-step.step-live::after{border-color:var(--warn);background:var(--warn);box-shadow:0 0 8px var(--warn)}
+.activity-step.step-err::after{border-color:var(--bad);background:var(--bad)}
+.step-details>summary{list-style:none;display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--text);cursor:pointer}
+.step-details>summary::-webkit-details-marker{display:none}
+.step-kind{font:700 9px var(--mono);padding:1px 5px;border:1px solid color-mix(in srgb,var(--accent2) 45%,transparent);color:var(--accent2);background:color-mix(in srgb,var(--accent2) 10%,transparent);letter-spacing:.5px;flex:none}
+.step-kind.verify{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent);background:color-mix(in srgb,var(--ok) 10%,transparent)}
+.step-title{font-weight:600;color:#fff;flex:none}
+.step-arg-preview{color:var(--muted);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.step-dur{margin-left:auto;font-size:10px;color:var(--ok);white-space:nowrap;flex:none}
+.step-output-box{margin:6px 0 2px 22px;padding:5px 10px;background:#06040b;border-left:2px solid var(--accent);border:1px solid rgba(50,38,82,.65);font:10.5px/1.45 var(--mono);color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 @keyframes blink{50%{opacity:.25}}
 @media (prefers-reduced-motion:no-preference){.activity:not(.done):not(.err) .pulse{animation:blink 1s infinite}}
 .stats{font:11px var(--mono);color:var(--muted);padding:0 14px 8px}
@@ -173,6 +394,32 @@ form.send{border-top:1px solid var(--line);background:var(--panel);padding:12px 
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--accent);padding:0;width:min(640px,94vw);border-radius:0}
 dialog::backdrop{background:rgba(10,6,16,.7)}
+/* Night dev (headless development mode). A <dialog>: top layer with its own scroll, so the page never scrolls (CLAUDE.md 8). */
+#nightDlg{width:min(980px,96vw);max-height:92vh;overflow:hidden;display:none;flex-direction:column}
+#nightDlg[open]{display:flex}
+#nightDlg .nd-body{flex:1;min-height:0;overflow:auto;padding:12px 16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+#nightDlg section{border:1px solid var(--line);background:var(--panel2);padding:10px 12px;min-width:0}
+#nightDlg h3{margin:0 0 8px;font:600 12px var(--mono);letter-spacing:1px}
+#nightDlg .wide{grid-column:1/-1}
+#nightDlg .nd-phases{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 8px;padding:0}
+#nightDlg .nd-phases li{font:11px var(--mono);border:1px solid var(--line);padding:3px 8px;color:var(--muted)}
+#nightDlg .nd-phases li[data-s="done"]{border-color:var(--ok);color:var(--ok)}
+#nightDlg .nd-phases li[data-s="now"]{border-color:var(--accent);color:var(--text);background:var(--panel)}
+@media (prefers-reduced-motion:no-preference){#nightDlg .nd-phases li[data-s="now"]{animation:blink 1.2s infinite}}
+#nightDlg .nd-live,#nightDlg .nd-log{font:11px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;margin:0;color:var(--muted);user-select:text;-webkit-user-select:text}
+#nightDlg .nd-log .warn{color:var(--warn)}
+#nightDlg .nd-budget{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}
+#nightDlg .nd-budget label{display:flex;flex-direction:column;gap:2px;font:10px var(--mono);color:var(--muted);letter-spacing:.5px}
+#nightDlg input,#nightDlg textarea{background:var(--panel);border:1px solid var(--line);padding:5px 7px;border-radius:0;font:13px var(--sans);color:var(--text);min-width:0}
+#nightDlg .nd-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
+#nightDlg .nd-list li{border:1px solid var(--line);padding:6px 8px;font-size:13px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;overflow-wrap:anywhere}
+#nightDlg .nd-list li .t{flex:1 1 220px;min-width:0}
+#nightDlg .nd-list li .m{flex-basis:100%;font:11px var(--mono);color:var(--muted)}
+#nightDlg .btn{padding:3px 9px;font-size:11px}
+#nightDlg .btn:focus-visible,#nightDlg input:focus-visible,#nightDlg textarea:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+#nightDlg .nd-state{font:600 12px var(--mono)}
+#nightDlg .nd-state[data-mode="running"]{color:var(--ok)}#nightDlg .nd-state[data-mode="paused"]{color:var(--warn)}
+@media (max-width:720px){#nightDlg .nd-body{grid-template-columns:minmax(0,1fr)}#nightDlg .nd-budget{grid-template-columns:minmax(0,1fr)}}
 dialog header{padding:10px 16px;border-bottom:1px solid var(--line);font:600 13px var(--mono);letter-spacing:1px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;padding:14px 16px}
 .grid label{display:flex;flex-direction:column;gap:4px;font:11px var(--mono);color:var(--muted);letter-spacing:1px}
@@ -227,13 +474,13 @@ dialog footer{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--
 .activity-companion{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;padding:7px 14px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,#282135,#1f1a2a);font:11px var(--mono)}
 .activity-companion[hidden]{display:none}.activity-pet{width:25px;height:25px;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;color:var(--accent2);background:#17131f}.activity-companion[data-state="thinking"] .activity-pet,.activity-companion[data-state="tool"] .activity-pet,.activity-companion[data-state="task"] .activity-pet{animation:activityPulse 1.4s ease-in-out infinite}.activity-companion[data-state="failed"] .activity-pet,.activity-companion[data-state="attention"] .activity-pet{color:var(--bad)}
 .activity-summary{min-width:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.activity-summary strong{color:var(--text)}.activity-summary span{color:var(--muted)}.activity-toggle{justify-self:end}.activity-details{grid-column:1/-1;border-top:1px solid var(--line);padding-top:7px;max-height:150px;overflow:auto;display:grid;gap:4px}.activity-details[hidden]{display:none}.activity-event{display:flex;gap:8px;align-items:baseline;color:var(--muted)}.activity-event time{flex:0 0 auto}.activity-event b{color:var(--text);font-weight:500}.activity-event.empty{margin:0;display:block;text-align:left;font:11px var(--mono)}
-@keyframes activityPulse{50%{box-shadow:0 0 10px #a77bff88;transform:scale(1.04)}}
+@keyframes activityPulse{50%{opacity:.8;transform:scale(1.05)}}
 @media(prefers-reduced-motion:reduce){.activity-companion[data-state="thinking"] .activity-pet,.activity-companion[data-state="tool"] .activity-pet,.activity-companion[data-state="task"] .activity-pet{animation:none}}
 /* Context engine: memory, compaction, message actions, slash commands, chat search */
 .usage-source{font:10px var(--mono);letter-spacing:1px;border:1px solid var(--line);padding:2px 6px;color:var(--muted)}
 .usage-source.exact,.usage-source.measured{border-color:#3fcf8e;color:#3fcf8e}
 .usage-trigger.warn{border-color:#f5b041;color:#f5b041}.usage-trigger.full{border-color:#e5484d;color:#e5484d}
-.mem-add{display:flex;gap:8px;margin:10px 0}.mem-add input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px}
+.mem-add{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.mem-add select{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px;font:12px var(--mono)}.mem-add input{flex:1 1 12em;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px}
 .mem-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .mem-list li{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);padding:7px;font:12px var(--mono)}
 .mem-list li span{flex:1;min-width:0;overflow-wrap:anywhere}.mem-list li .btn{padding:2px 7px;font:10px var(--mono)}
@@ -252,7 +499,8 @@ form.send{position:relative}
 .slash-hints li b{color:var(--text);min-width:110px}.slash-hints li span{color:var(--muted)}
 .slash-hints li[aria-selected="true"]{background:var(--panel2);outline:1px solid var(--accent)}
 @media (prefers-reduced-motion:reduce){.slash-hints,.compact-mark{transition:none}}
-@media(max-width:600px){form.send{flex-wrap:wrap}#input{flex:1 1 100%}}
+@media(max-width:1100px){form.send{flex-wrap:wrap}#input{flex:1 1 100%}}
+#log{contain:content}
 @media(max-width:820px){.usage-pop,.plugin-pop,.mcp-pop{right:8px;width:calc(100vw - 16px);max-height:calc(100vh - 64px)}}
 
 #menu{display:none}
@@ -275,7 +523,7 @@ form.send{position:relative}
 #atomicVeil .atomic-vortex:after{inset:22%;transform:rotateY(68deg) rotate(0deg);}
 #atomicVeil span{font:600 10px var(--mono);letter-spacing:2px;color:#f1e8ff;text-shadow:0 0 24px #a77bff;z-index:1;}
 @keyframes atomicVacuum{0%{opacity:0}12%{opacity:1}40%{opacity:1;background:radial-gradient(circle,#a77bff44,#08060dee 70%)}58%{opacity:1}82%{opacity:.35}100%{opacity:0}}
-@keyframes atomicVortexCollapse{0%{transform:scale(1.2) rotate(0);filter:blur(0) drop-shadow(0 0 26px #a77bff99)}45%{transform:scale(.72) rotate(130deg);filter:blur(1px) drop-shadow(0 0 44px #a77bff)}78%{transform:scale(.025) rotate(300deg);filter:blur(5px)}100%{transform:scale(0) rotate(360deg);filter:blur(10px)}}
+@keyframes atomicVortexCollapse{0%{transform:scale(1.2) rotate(0);opacity:1}45%{transform:scale(.72) rotate(130deg);opacity:.95}78%{transform:scale(.06) rotate(300deg);opacity:.4}100%{transform:scale(0) rotate(360deg);opacity:0}}
 #atomicVeil.run .atomic-vortex{animation:atomicVortexCollapse .78s cubic-bezier(.6,0,.8,.2) both}
 @media(prefers-reduced-motion:reduce){#atomicVeil.run{animation:none;opacity:0}#atomicToast{transition:none}}
 
@@ -293,23 +541,30 @@ form.send{position:relative}
 .execution-filter label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted);white-space:nowrap}
 .execution-filter input{cursor:pointer}
 .execution-log{flex:1;overflow:auto;padding:12px 16px;display:grid;gap:10px}
-.exec-card{border:1px solid var(--line);background:var(--panel2);border-radius:0;padding:0}
+.exec-card{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:0;overflow:hidden}
 .exec-card.error{border-color:var(--bad);background:rgba(255,92,108,.08)}
 .exec-card.success{border-color:var(--ok);background:rgba(63,207,142,.04)}
 .exec-card.pending{border-color:var(--warn);background:rgba(245,176,65,.04)}
-.exec-header{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.exec-header{width:100%;display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;border:0;background:transparent;color:var(--text);text-align:left;font:inherit}
 .exec-header:hover{background:rgba(167,123,255,.06)}
 .exec-icon{width:6px;height:6px;background:var(--accent);border-radius:50%;flex:none}
 .exec-card.error .exec-icon{background:var(--bad)}.exec-card.success .exec-icon{background:var(--ok)}.exec-card.pending .exec-icon{background:var(--warn)}
 .exec-time{font:10px var(--mono);color:var(--muted);white-space:nowrap}
 .exec-tool{font:600 11px var(--mono);color:var(--text);letter-spacing:.5px}
 .exec-status{font:10px var(--mono);color:var(--muted);margin-left:auto;padding:2px 6px;border:1px solid var(--line);border-radius:2px}
-.exec-body{padding:10px 12px;display:none;grid-template-columns:1fr 1fr;gap:8px;font:11px var(--mono)}
-.exec-card.expanded .exec-body{display:grid}
+.exec-body{padding:10px 12px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:8px;font:11px var(--mono)}
+.exec-body[hidden]{display:none}
 .exec-section{display:flex;flex-direction:column;gap:4px}
 .exec-section-title{color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:9px}
 .exec-value{color:var(--text);word-break:break-all;background:#0f0c15;padding:4px 6px;border:1px solid var(--line);font:10px var(--mono);line-height:1.3}
 .exec-code{background:#0f0c15;border:1px solid var(--line);padding:6px;max-height:200px;overflow:auto;font:10px/1.3 var(--mono);color:#a9d900}
+.exec-detail{grid-column:1/-1;min-width:0}.exec-detail pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.exec-copy{float:right;border:1px solid var(--line);background:var(--panel);color:var(--muted);padding:2px 7px;cursor:pointer;font:10px var(--mono)}.exec-message{grid-column:1/-1;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}.exec-header:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.exec-status[data-status="failed"],.exec-status[data-status="error"]{color:var(--bad);border-color:var(--bad)}.exec-status[data-status="complete"],.exec-status[data-status="success"]{color:var(--ok);border-color:var(--ok)}
+.exec-kind{font:9px var(--mono);color:var(--accent2);letter-spacing:.6px;border:1px solid var(--line);padding:1px 5px;white-space:nowrap}
+.exec-detail{border-left:2px solid var(--line);padding:3px 0 3px 8px}
+.exec-detail[open]{border-left-color:var(--accent)}
+.exec-detail>summary{cursor:pointer;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:9px;list-style: disclosure-closed}
+.exec-detail[open]>summary{list-style:disclosure-open;color:var(--text)}
+@media(max-width:680px){.exec-body{grid-template-columns:1fr}.execution-filter{gap:8px;flex-wrap:wrap}}
 .exec-perf{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px;background:#0f0c15;border:1px solid var(--line);font:10px var(--mono)}
 .exec-perf-item{display:flex;flex-direction:column;gap:2px}
 .exec-perf-label{color:var(--muted);font-size:9px}
@@ -321,6 +576,9 @@ form.send{position:relative}
 #log .msg .who>span:first-child,#log .msg .who>span:first-child *{-webkit-user-select:none !important;user-select:none !important;cursor:default}
 /* Code-block Copy button text is not selectable (it would otherwise leak into copied code). */
 #log .msg .body button,#log .msg .body button.copy{-webkit-user-select:none !important;user-select:none !important;cursor:pointer}
+/* Controls inside the chat log (queue strip: PAUSE AUTO / SEND NEXT / CLEAR, queue item actions, any button)
+   must never join a text selection. The #log * rule above is !important, so this one must be too. */
+#log button,#log button *,#log .queue-strip,#log .queue-strip *,#log .queue-actions,#log .queue-actions *,#log .queue-tag{-webkit-user-select:none !important;user-select:none !important}
 #log .msg .copy-message{margin-left:auto;flex:none;user-select:none !important;-webkit-user-select:none !important;padding:2px 8px;font:10px var(--mono)}
 #log ::selection{background:#c084fc !important;color:#120d1b !important}
 #knowledgeDlg{max-height:88vh;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
@@ -332,7 +590,7 @@ form.send{position:relative}
   <aside id="side" aria-label="Bots and chats">
     <div class="brand"><span class="mark-fx" id="markFx"><i class="mark-glow"></i><img class="mark" src="/atlas-mark.png" alt="" aria-hidden="true"><span class="mark-sweep"><i></i></span><canvas class="mark-bolts" id="markBolts" aria-hidden="true"></canvas></span><span class="word">ATLAS</span><span class="spacer"></span><button class="btn" id="newBot" type="button">+ Bot</button></div>
     <div class="sec"><span>01 // BOTS</span><span id="swap" class="badge">SWAP ?</span></div>
-    <div id="bots" class="scroll" role="list"></div>
+    <div id="bots" class="scroll" role="group" aria-label="Bots. Alt+Up or Alt+Down moves the selected bot."></div>
     <div class="sec"><span id="chatsTitle">02 // CHATS</span><button class="btn" id="newChat" type="button">+ Chat</button></div>
     <div class="tabs" role="tablist" aria-label="Chat views">
       <button class="btn tab" id="tabChats" type="button" role="tab" aria-selected="true">CHATS</button>
@@ -356,13 +614,17 @@ form.send{position:relative}
       <span class="spacer"></span>
       <button class="usage-trigger" id="usageBtn" type="button" aria-expanded="false">CTX // NO REQUEST</button>
       <button class="usage-trigger" id="memoryBtn" type="button" aria-expanded="false" title="Facts Atlas remembers across chats">MEMORY // --</button>
+      <button class="usage-trigger" id="syncBtn" type="button" aria-expanded="false" title="Shared project context for Atlas, Claude Code, Codex, Cursor, Gemini">SYNC // --</button>
       <button class="plugin-trigger" id="pluginsBtn" type="button" aria-expanded="false" aria-live="polite">PLUGINS // CHECKING</button>
       <button class="mcp-trigger" id="mcpBtn" type="button" aria-expanded="false" aria-live="polite">MCP // CHECKING</button>
       <label class="small" for="hdrModel">MODEL</label>
       <select id="hdrModel" title="Model this bot uses. Saved per bot."><option value="">Discovering local models…</option></select>
       <span id="imageSupportBadge" class="badge" title="Image input capability for this model">IMAGE ?</span>
       <button class="btn" id="teamBtn" type="button" title="Plan, build, review and hand off across several bots">Team run</button>
+      <button class="btn" id="backgroundBtn" type="button" title="Start a background swarm that keeps running while you use other chats">Run in background</button>
+      <button class="btn" id="nightBtn" type="button" aria-haspopup="dialog" title="Night dev: Atlas improves its own code with local models while you are away">NIGHT DEV // OFF</button>
       <button class="btn" id="skillsBtn" type="button" title="Skill library: reusable prompt add-ons any bot can use">Skills</button>
+      <button class="btn" id="testSuiteBtn" type="button" onclick="window.open('/test-suite','_blank','noopener')" title="Open Kanban Tickbox Test Suite">Test Suite</button>
       <button class="btn" id="editBot" type="button">Edit bot</button>
     </div>
     <section id="activityCompanion" class="activity-companion" data-state="idle" aria-label="Atlas activity" hidden>
@@ -373,18 +635,19 @@ form.send{position:relative}
     </section>
 
     <!-- Detailed Execution Log Panel -->
-    <section id="executionPanel" class="execution-panel" aria-label="Detailed execution log" hidden>
+    <section id="executionPanel" class="execution-panel" aria-label="Bot action history" hidden>
       <div class="execution-head">
-        <strong>EXECUTION LOG // DETAILED</strong>
+        <strong>BOT ACTIONS // HISTORY</strong>
         <span class="spacer"></span>
         <button class="btn" id="executionRefresh" type="button">REFRESH</button>
         <button class="btn" id="executionClose" type="button">CLOSE</button>
       </div>
       <div class="execution-filter">
-        <label><input type="checkbox" id="filterErrors" value="errors"> Show errors only</label>
-        <label><input type="checkbox" id="filterTools" value="tools"> Show tool calls only</label>
-        <label><input type="checkbox" id="filterCache" value="cache"> Show cache stats</label>
+        <label><input type="checkbox" id="filterErrors" value="errors"> Errors only</label>
+        <label><input type="checkbox" id="filterTools" value="tools"> Tool actions only</label>
+        <label><input type="checkbox" id="filterCache" value="cache"> Cache details only</label>
       </div>
+      <div class="usage-muted" style="padding:8px 16px">Open an action to see its input, result, timing, and other saved details. Secret fields are hidden.</div>
       <div id="executionLog" class="execution-log"></div>
     </section>
     <section id="pluginsPanel" class="plugin-pop" aria-label="Atlas plugin manager">
@@ -452,13 +715,26 @@ form.send{position:relative}
       <div class="usage-muted" id="memoryStatus" role="status"></div>
       <ul class="mem-list" id="memoryList"></ul>
     </section>
+    <section id="syncPanel" class="usage-pop" aria-label="Shared project context">
+      <div class="usage-head"><strong>ATLAS // CTXSYNC</strong><span class="spacer"></span><button class="btn" id="syncClose" type="button">CLOSE</button></div>
+      <div class="usage-muted">One shared log per project. Memory facts are copied in. Other tools read it through <b>ctx_sync.py serve</b> (MCP) or <b>render</b> (CLAUDE.md, AGENTS.md, GEMINI.md). ChatGPT, Grok and AI Studio: paste only.</div>
+      <form class="mem-add" id="syncForm"><label class="sr" for="syncProject">Project</label><input id="syncProject" maxlength="80" placeholder="project" style="flex:0 1 9em"><label class="sr" for="syncKind">Kind</label><select id="syncKind"><option>note</option><option>decision</option><option>fact</option><option>todo</option></select><label class="sr" for="syncText">New shared note</label><input id="syncText" maxlength="4000" placeholder="e.g. We use SQLite, not Postgres"><button class="btn primary" type="submit">ADD</button></form>
+      <div class="usage-muted" id="syncStatus" role="status"></div>
+      <ul class="mem-list" id="syncList"></ul>
+    </section>
     <div id="swarmBar" role="status" aria-live="polite" hidden></div>
-    <div id="log" aria-live="polite"></div>
+    <section id="approvals" aria-label="Tool calls that wait for your approval" aria-live="assertive" hidden></section>
+    <div id="chatStage">
+      <div id="log" aria-live="polite"></div>
+      <section id="stageView" aria-label="Swarm step: live view" tabindex="-1" hidden></section>
+      <div id="uplinkRail" role="region" aria-label="Model connections: where each model runs" hidden></div>
+    </div>
     <section id="opsPanel" style="padding:20px 16px;overflow:auto">
       <div style="max-width:1200px;margin:0 auto">
         <div style="display:flex;align-items:center;gap:12px;margin:0 0 16px">
           <h2 style="font:600 18px var(--mono);color:var(--text);margin:0;flex:1">OPERATIONS // LLAMA-SWAP</h2>
-          <button class="btn" id="executionBtn" type="button" title="Detailed tool calls, parameters, and performance">EXECUTION LOG</button>
+          <button class="btn primary" id="opsBackToChat" type="button" onclick="showPage('chat')" title="Return to the active chat">← BACK TO CHAT</button>
+          <button class="btn" id="executionBtn" type="button" title="View and filter detailed actions from this chat">BOT ACTIONS</button>
         </div>
         <iframe id="llama-iframe" title="llama-swap dashboard" style="height:calc(100vh - 150px);min-height:520px;border:1px solid var(--line)"></iframe>
       </div>
@@ -490,7 +766,7 @@ form.send{position:relative}
   <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
     <section style="min-width:0"><h3 style="font:12px var(--mono)">01 // SOURCE MATERIAL</h3><p class="usage-muted">Import Markdown, text, CSV datasets, JSON, YAML, code, logs, PDF and books (EPUB, MOBI, AZW3, FB2, RTF, ODT; up to 100 MB each). A model reads a book chapter by chapter. Scanned PDFs can use local Tesseract OCR when the optional OCR dependencies are installed. Sources stay local in .atlas/knowledge.</p>
       <label class="btn" for="knowledgeFiles">+ IMPORT SOURCES</label><input id="knowledgeFiles" type="file" accept=".md,.markdown,.txt,.csv,.json,.yaml,.yml,.py,.sql,.log,.epub,.mobi,.azw,.azw3,.fb2,.rtf,.odt,.pdf" multiple class="sr">
-      <div style="margin-top:10px;border:1px solid var(--line);padding:9px;display:grid;gap:7px"><b style="font:11px var(--mono)">BROWSER CHAT // IMPORT TRANSCRIPT</b><input id="browserChatUrl" type="url" placeholder="Browser chat URL (optional)" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"><textarea id="browserChatText" rows="5" placeholder="Paste the browser conversation here. In the browser chat, scroll to the beginning, select/copy the conversation, then paste it here." style="width:100%;resize:vertical;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"></textarea><div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn" id="browserChatOpen" type="button">OPEN CHAT IN BROWSER</button><button class="btn" id="browserChatCopy" type="button">COPY PASTED TEXT</button><button class="btn primary" id="browserChatImport" type="button">IMPORT BROWSER CHAT</button></div><small class="usage-muted">Atlas cannot directly read a signed-in browser tab because browser security blocks local apps from accessing another site's private session. Paste or copy the transcript here; the source URL is stored as provenance.</small></div>
+      <div style="margin-top:10px;border:1px solid var(--line);padding:9px;display:grid;gap:7px"><b style="font:11px var(--mono)">BROWSER CHAT // IMPORT TRANSCRIPT</b><input id="browserChatUrl" aria-label="Browser chat URL (optional)" type="url" placeholder="Browser chat URL (optional)" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"><textarea id="browserChatText" aria-label="Pasted browser conversation" rows="5" placeholder="Paste the browser conversation here. In the browser chat, scroll to the beginning, select/copy the conversation, then paste it here." style="width:100%;resize:vertical;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"></textarea><div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn" id="browserChatOpen" type="button">OPEN CHAT IN BROWSER</button><button class="btn" id="browserChatCopy" type="button">COPY PASTED TEXT</button><button class="btn primary" id="browserChatImport" type="button">IMPORT BROWSER CHAT</button></div><small class="usage-muted">Atlas cannot directly read a signed-in browser tab because browser security blocks local apps from accessing another site's private session. Paste or copy the transcript here; the source URL is stored as provenance.</small></div>
       <div id="knowledgeItems" style="margin-top:12px;display:grid;gap:7px;max-height:42vh;overflow:auto"></div>
     </section>
     <section style="min-width:0"><h3 style="font:12px var(--mono)">02 // DISTILL INTO STUDY CAPSULE</h3><p class="usage-muted">A larger local teacher model studies every chunk, then hierarchical distillation creates structured notes, glossary, concept relationships and questions. Atlas builds a local embedding index and retrieves relevant passages into chats.</p>
@@ -498,7 +774,7 @@ form.send{position:relative}
       <button class="btn primary" id="distillBtn" type="button" style="width:100%">DISTIL SELECTED SOURCES</button><button class="btn" id="distillChatBtn" type="button" style="width:100%;margin-top:7px">DISTIL ACTIVE CHAT</button>
       <div id="distillStatus" class="usage-muted" style="margin-top:10px">Select sources to begin.</div>
       <div id="knowledgeIndexStatus" class="usage-muted" style="margin-top:8px">Semantic index not built yet.</div><button class="btn" id="knowledgeReindex" type="button" style="width:100%;margin-top:6px">BUILD / REBUILD KNOWLEDGE INDEX</button>
-      <div style="display:flex;gap:6px;margin-top:10px"><input id="knowledgeQuery" placeholder="Search concepts, procedures, facts…" style="min-width:0;flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"><button class="btn" id="knowledgeSearch" type="button">SEARCH</button></div>
+      <div style="display:flex;gap:6px;margin-top:10px"><input id="knowledgeQuery" aria-label="Search the knowledge library" placeholder="Search concepts, procedures, facts…" style="min-width:0;flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px"><button class="btn" id="knowledgeSearch" type="button">SEARCH</button></div>
       <div id="knowledgeResults" style="display:grid;gap:6px;margin-top:8px;max-height:22vh;overflow:auto"></div>
       <button class="btn" id="knowledgeGraphBtn" type="button" style="width:100%;margin-top:8px">INSPECT KNOWLEDGE GRAPH</button><div id="knowledgeGraph" class="usage-muted" style="margin-top:6px"></div>
       <div id="distillHistory" style="margin-top:12px;display:grid;gap:7px;max-height:24vh;overflow:auto"></div>
@@ -516,7 +792,7 @@ form.send{position:relative}
       <label class="full">DESCRIPTION<input id="fDesc" maxlength="120"></label>
       <label class="full">SYSTEM PROMPT<textarea id="fSystem"></textarea></label>
       <fieldset class="full" id="fSkills"><legend>SKILLS (their prompts are added after the system prompt)</legend></fieldset>
-      <label class="full">DOCUMENTS FOLDER (optional, full path; top 3 matching snippets are added to each question)<input id="fDocs" placeholder="F:\docs\my-bot" spellcheck="false"></label>
+      <label class="full">DOCUMENTS FOLDER (optional, full path; top 3 matching snippets are added to each question)<input id="fDocs" placeholder="D:\docs\my-bot" spellcheck="false"></label>
       <label>TEMPERATURE (0-2)<input id="fTemp" type="number" min="0" max="2" step="0.05"></label>
       <label>TOP P (0-1)<input id="fTopP" type="number" min="0" max="1" step="0.05"></label>
       <label>MAX OUTPUT TOKENS<input id="fMax" type="number" min="512" step="64"></label>
@@ -538,7 +814,7 @@ form.send{position:relative}
   <form method="dialog" id="teamForm">
     <header id="teamTitle">TEAM RUN // PLAN, BUILD, REVIEW, HAND OFF</header>
     <div class="grid">
-      <label class="full">GOAL<textarea id="tGoal" required placeholder="Example: Write a PowerShell script that backs up F:\app-dev to H:\backup daily, with tests."></textarea></label>
+      <label class="full">GOAL<textarea id="tGoal" required placeholder="Example: Write a PowerShell script that backs up D:\projects to E:\backup daily, with tests."></textarea></label>
       <fieldset class="full" id="tBots"><legend>TEAM (Agent planner and Reviewer join automatically)</legend></fieldset>
       <label>REVIEW ROUNDS PER STEP (1-3)<input id="tIters" type="number" min="1" max="3" value="2"></label>
     </div>
@@ -549,18 +825,76 @@ form.send{position:relative}
     </footer>
   </form>
 </dialog>
+<dialog id="backgroundDlg" aria-labelledby="backgroundTitle">
+  <form method="dialog" id="backgroundForm">
+    <header id="backgroundTitle">BACKGROUND RUN // OFFLOAD TO THE TEAM</header>
+    <div class="grid">
+      <label class="full">GOAL<textarea id="backgroundGoal" required maxlength="12000" placeholder="Example: Inspect the app, fix the queue drag and drop bug, and report test results."></textarea></label>
+      <p class="full usage-muted">Atlas starts a separate swarm run. It continues while you use other chats. Agents split the work and route steps to local or enabled cloud models.</p>
+    </div>
+    <footer>
+      <button class="btn primary" value="start" type="submit">Start background run</button>
+      <span class="spacer"></span>
+      <button class="btn" value="cancel" formnovalidate type="submit">Cancel</button>
+    </footer>
+  </form>
+</dialog>
 <dialog id="wsDlg" aria-labelledby="wsTitle">
   <form method="dialog" id="wsForm">
     <header id="wsTitle">WORKSPACE // WORKING FOLDER</header>
     <div class="grid">
-      <label class="full">WORKING FOLDER PATH<input id="wsPath" autocomplete="off" placeholder="F:\APP-DEV\projects\my-project"></label>
+      <label class="full">WORKING FOLDER PATH<input id="wsPath" autocomplete="off" placeholder="D:\projects\my-project"></label>
       <div class="full" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="wsSet" type="button">SET FOLDER</button><button class="btn" id="wsClear" type="button">CLEAR</button><button class="btn" id="wsRefresh" type="button">REFRESH</button></div>
       <p class="full usage-muted" id="wsInfo" role="status"></p>
       <div class="full" id="wsList" style="display:flex;flex-direction:column;gap:4px;max-height:280px;overflow:auto"></div>
-      <p class="full usage-muted">Click a file to attach it to your next message. MCP file tools and the model's working directory use this folder. Text files up to 300 KB and PNG, JPEG or WebP images up to 8 MB.</p>
+      <p class="full usage-muted">Click a file to attach it to your next message. MCP file tools and the model's working directory use this folder. /swarm bots read this folder (read-only), so set it to your project folder, not to swarm-workspaces or swarm-output. Text files up to 300 KB and PNG, JPEG or WebP images up to 8 MB.</p>
     </div>
     <footer><span class="spacer"></span><button class="btn" value="cancel" formnovalidate type="submit">CLOSE</button></footer>
   </form>
+</dialog>
+<dialog id="nightDlg" aria-labelledby="nightTitle">
+  <header id="nightTitle">NIGHT DEV // ATLAS IMPROVES ITSELF WITH LOCAL MODELS</header>
+  <div class="nd-body">
+    <section class="wide" aria-labelledby="ndNowH">
+      <h3 id="ndNowH">NOW</h3>
+      <p><span class="nd-state" id="ndState" role="status" aria-live="polite">OFF</span> <span class="hint" id="ndWhy"></span></p>
+      <ol class="nd-phases" id="ndPhases" aria-label="Phases of the current cycle"></ol>
+      <p class="hint" id="ndItem"></p>
+      <p class="hint" id="ndCounters"></p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn primary" id="ndStart" type="button">Start night dev</button>
+        <button class="btn" id="ndStop" type="button">Stop</button>
+      </div>
+      <p class="hint" style="margin-top:8px">Works in a separate copy of the repo (<span id="ndRepo"></span>). Never pushes, never touches your branches, never runs model-written commands. It pauses while you chat. Nothing is merged without your yes.</p>
+    </section>
+    <section aria-labelledby="ndLiveH"><h3 id="ndLiveH">WHAT THE MODEL WRITES</h3><pre class="nd-live" id="ndLive" tabindex="0">Nothing yet.</pre></section>
+    <section aria-labelledby="ndLogH"><h3 id="ndLogH">LOG</h3><div class="nd-log" id="ndLog" tabindex="0" role="log"></div></section>
+    <section class="wide" aria-labelledby="ndPkgH"><h3 id="ndPkgH">PACKAGES FOR YOUR REVIEW</h3><ul class="nd-list" id="ndPkgs"></ul><pre class="nd-live" id="ndReport" tabindex="0" hidden></pre></section>
+    <section aria-labelledby="ndQueueH"><h3 id="ndQueueH">WAITING FOR YOU (NOT RUN)</h3><ul class="nd-list" id="ndQueue"></ul></section>
+    <section aria-labelledby="ndBudgetH"><h3 id="ndBudgetH">BUDGETS</h3>
+      <form id="ndBudget" class="nd-budget">
+        <label>CYCLES PER NIGHT<input type="number" name="max_cycles" min="1" max="50"></label>
+        <label>MINUTES PER NIGHT<input type="number" name="night_minutes" min="5" max="720"></label>
+        <label>TOKENS PER NIGHT<input type="number" name="night_tokens" min="1000" max="500000" step="1000"></label>
+        <label>MINUTES PER CYCLE<input type="number" name="cycle_minutes" min="2" max="120"></label>
+        <label>TOKENS PER CYCLE<input type="number" name="cycle_tokens" min="500" max="100000" step="500"></label>
+        <label>STOP AFTER FAILURES IN A ROW<input type="number" name="max_failures" min="1" max="10"></label>
+        <label>WAIT AFTER MY LAST CHAT (MIN)<input type="number" name="idle_minutes" min="0" max="240"></label>
+        <label>REVIEW MODEL ALIAS<input type="text" name="review_model" maxlength="60"></label>
+        <label>PLAN MODEL ALIAS<input type="text" name="plan_model" maxlength="60"></label>
+        <label>BUILD MODEL ALIAS<input type="text" name="build_model" maxlength="60"></label>
+        <label style="grid-column:1/-1">REPOSITORY FOLDER (EMPTY = FIND IT)<input type="text" name="repo" maxlength="300"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="cloud_enabled"> CLOUD REVIEW (TEXT LEAVES THIS PC)</label>
+        <label>CLOUD SPEND LIMIT (USD, 0 = OFF)<input type="number" name="cloud_spend_limit_usd" min="0" max="20" step="0.5"></label>
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center"><button class="btn" type="submit">Save budgets</button><span class="hint" id="ndBudgetMsg" role="status"></span></div>
+      </form>
+    </section>
+    <section class="wide" aria-labelledby="ndBacklogH"><h3 id="ndBacklogH">BACKLOG (ONE ITEM PER CYCLE)</h3>
+      <form id="ndAdd" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><label class="sr" for="ndAddTitle">New backlog item</label><input id="ndAddTitle" style="flex:1 1 240px" placeholder="One small change, for example: add a test for ..." maxlength="200"><button class="btn" type="submit">Add</button><button class="btn" type="button" id="ndReseed">Find TODOs again</button></form>
+      <ul class="nd-list" id="ndBacklog"></ul>
+    </section>
+  </div>
+  <footer><span class="hint" id="ndMsg" role="status"></span><span class="spacer"></span><button class="btn" type="button" id="ndClose">Close</button></footer>
 </dialog>
 <dialog id="voiceDlg" aria-labelledby="voiceTitle">
   <form method="dialog" id="voiceForm">
@@ -757,15 +1091,20 @@ function renderContextMeter(){
   const rows=[["System prompt + skills",ctx.system],["Compacted summary",ctx.summary],["Memory",ctx.memory],["Retrieved knowledge",ctx.knowledge],["Conversation",ctx.conversation],["Attachments / images",ctx.attachments],["Template / Atlas prompt / docs",ctx.other],["Reply",ctx.output||ctx.live]].filter(([,v])=>Number(v)>0);
   $("#ctxBreakdown").innerHTML=rows.map(([n,v])=>`<span>${n}</span><span>${Math.round(v).toLocaleString()}</span><span class="muted">${Math.round(100*v/Math.max(1,used))}%</span>`).join("")+(ctx.titles&&ctx.titles.length?`<span class="muted" style="grid-column:1/-1">Library: ${esc(ctx.titles.join(", "))}</span>`:"");
 }
-const infoPanels=[['pluginsPanel','pluginsBtn'],['mcpPanel','mcpBtn'],['usagePanel','usageBtn'],['memoryPanel','memoryBtn']];
+const infoPanels=[['pluginsPanel','pluginsBtn'],['mcpPanel','mcpBtn'],['usagePanel','usageBtn'],['memoryPanel','memoryBtn'],['syncPanel','syncBtn']];
+// One panel at a time: opening one closes the others. No layout reads, so it opens in the same frame.
 function arrangeInfoPanels(active){
-  const ordered=active?[...infoPanels.filter(([id])=>id===active),...infoPanels.filter(([id])=>id!==active)]:infoPanels;let top=58;
-  for(const [id,trigger] of ordered){const panel=$(`#${id}`),button=$(`#${trigger}`);if(!panel.classList.contains('open'))continue;
-    panel.style.top=`${top}px`;panel.style.zIndex=id===active?'30':'20';button.setAttribute('aria-expanded','true');
-    top+=Math.min(panel.getBoundingClientRect().height,Math.max(180,innerHeight-top-12))+8;
+  for(const [id,trigger] of infoPanels){const panel=$(`#${id}`);
+    if(active&&id!==active)panel.classList.remove('open');
+    const open=panel.classList.contains('open');$(`#${trigger}`)?.setAttribute('aria-expanded',String(open));
+    if(open){panel.style.top='58px';panel.style.zIndex='30';}
   }
 }
-window.addEventListener('resize',()=>arrangeInfoPanels());
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape"||e.defaultPrevented)return;
+  for(const [id,trigger] of infoPanels){const panel=$(`#${id}`);if(panel?.classList.contains("open")){e.preventDefault();panel.classList.remove("open");arrangeInfoPanels();$(`#${trigger}`)?.focus();return;}}
+  const exec=$("#executionPanel");if(exec&&!exec.hidden){e.preventDefault();toggleExecutionPanel(false);}
+});
 function recordUsage(tokens, seconds){
   const now=Date.now(); usage.events.push({at:now,tokens:Math.max(0,Math.round(tokens||0)),seconds:Math.max(0,Number(seconds)||0)});
   usage.events=usage.events.filter(e=>e.at>now-8*86400000).slice(-10000); saveUsage(); refreshUsage();
@@ -856,7 +1195,7 @@ async function compactChat(c, b, upto, reason){
 function addCompactMark(c){
   const d = document.createElement("details"); d.className = "compact-mark";
   d.innerHTML = `<summary>CONTEXT COMPACTED // ${c.compact.count || c.compact.upto} earlier messages summarised${c.compact.reason === "auto" ? " automatically" : ""} · click to read the summary</summary><div class="think-text">${esc(c.compact.summary)}</div>`;
-  $("#log").appendChild(d);
+  (logBatchFrag || $("#log")).appendChild(d);
 }
 function addNote(text){ const d = document.createElement("div"); d.className = "chat-note"; d.setAttribute("role", "status"); d.textContent = text; const log = $("#log"); const e = log.querySelector(".empty"); if (e) e.remove(); log.appendChild(d); log.scrollTop = log.scrollHeight; return d; }
 
@@ -909,7 +1248,8 @@ const SLASH = [
   ["/retry", "Write the last answer again"],
   ["/new", "Start a new chat with this bot"],
   ["/help", "List the commands"],
-  ["/swarm", "Run a swarm of bots on a goal: /swarm build X"],
+  ["/swarm", "Run a swarm of bots: /swarm [local|hyper|abliterated] build X"],
+  ["/hyperswarm", "Run high-speed hybrid swarm: /hyperswarm build X"],
 ];
 function isSlashCommand(t){ return /^\/(compact|context|remember|forget|memory|retry|new|clear|help)\b/i.test(String(t || "").trim()); }
 async function runSlash(t){
@@ -981,6 +1321,23 @@ function toggleMemoryPanel(force){
   const p = $("#memoryPanel"), open = force ?? !p.classList.contains("open");
   p.classList.toggle("open", open); $("#memoryBtn").setAttribute("aria-expanded", String(open));
   if (open) { loadMemory(); arrangeInfoPanels("memoryPanel"); setTimeout(() => $("#memoryText").focus(), 0); } else arrangeInfoPanels();
+}
+/* ctxsync: shared project context (ctx_sync.py). Memory facts are bridged in by /api/sync/status. */
+async function loadSync(){
+  const p = $("#syncProject").value.trim();
+  try {
+    const d = await (await fetch("/api/sync/status" + (p ? "?project=" + encodeURIComponent(p) : ""))).json();
+    if (!d.ok) throw new Error(d.error || "failed");
+    $("#syncProject").value = d.project; $("#syncBtn").textContent = `SYNC // ${d.count}`;
+    $("#syncStatus").textContent = `${d.dir}${d.bridged ? ` · ${d.bridged} memory facts added` : ""}`;
+    const ul = $("#syncList"); ul.innerHTML = d.recent.length ? "" : `<li class="usage-muted">No shared notes yet.</li>`;
+    d.recent.slice().reverse().forEach(r => { const li = document.createElement("li"); li.textContent = `[${r.source}/${r.kind}] ${r.text}`; ul.appendChild(li); });
+  } catch (e) { $("#syncStatus").textContent = "SYNC NOT READY: " + e.message; }
+}
+function toggleSyncPanel(force){
+  const p = $("#syncPanel"), open = force ?? !p.classList.contains("open");
+  p.classList.toggle("open", open); $("#syncBtn").setAttribute("aria-expanded", String(open));
+  if (open) { loadSync(); arrangeInfoPanels("syncPanel"); setTimeout(() => $("#syncText").focus(), 0); } else { arrangeInfoPanels(); $("#syncBtn").focus(); }
 }
 
 
@@ -1118,6 +1475,7 @@ const skillsFor = b => ((b && b.skills) || []).map(id => (S.skills || []).find(s
 const sysFor = b => [b.system || "", ...skillsFor(b).map(s => `SKILL // ${s.name}:\n${s.prompt}`)].filter(x => x.trim()).join("\n\n");
 
 /* ---------- model picker (per bot) ---------- */
+let cloudModels = [];
 const LABELS = {
   coder: "coder // Qwen3.6 35B MoE, code + agents",
   mentor: "mentor // Gemma 4 26B MoE, advice + teaching",
@@ -1125,37 +1483,66 @@ const LABELS = {
   tasks: "tasks // gpt-oss 20B, fastest, lists + plans",
   "mentor-dense": "mentor-dense // old Gemma 4 31B, slow"
 };
-const label = m => LABELS[m] || m;
-function fillModelPicker(){
-  const sel = $("#hdrModel"); if (!sel || document.activeElement === sel) return;
-  const b = bot(), list = [...new Set([...models, b.model])];
+const cloudMeta = m => cloudModels.find(c => c && c.id === m) || null;
+const label = m => { const cm = cloudMeta(m); return cm ? `${cm.label} // ${cm.model}` : (LABELS[m] || m); };
+function fillModelOptions(sel, currentModel){
   sel.innerHTML = "";
-  list.forEach(m => {
+  const isCloud = m => String(m || "").startsWith("cloud:");
+  const localList = [...new Set([...models, ...(currentModel && !isCloud(currentModel) ? [currentModel] : [])])];
+  const localGroup = document.createElement("optgroup");
+  localGroup.label = "LOCAL (THIS PC)";
+  localList.forEach(m => {
     const o = document.createElement("option"); o.value = m;
     const st = status[m]; o.textContent = label(m) + (st === "ready" ? "  [LOADED]" : !models.includes(m) ? "  [MISSING]" : "");
-    sel.appendChild(o);
+    localGroup.appendChild(o);
   });
-  sel.value = b.model;
+  sel.appendChild(localGroup);
+  const cloudIds = new Set(cloudModels.map(c => c.id));
+  const extraCloud = currentModel && isCloud(currentModel) && !cloudIds.has(currentModel)
+    ? [{ id: currentModel, label: currentModel, model: currentModel, env: "API_KEY", ready: false }] : [];
+  const allCloud = [...cloudModels, ...extraCloud];
+  if (allCloud.length) {
+    const cloudGroup = document.createElement("optgroup");
+    cloudGroup.label = "CLOUD (TEXT LEAVES THIS PC)";
+    allCloud.forEach(c => {
+      const o = document.createElement("option"); o.value = c.id;
+      o.textContent = `${c.label} // ${c.model}  [${c.ready ? "KEY READY" : "SET " + c.env}]`;
+      cloudGroup.appendChild(o);
+    });
+    sel.appendChild(cloudGroup);
+  }
+  sel.value = currentModel;
+}
+function fillModelPicker(){
+  const sel = $("#hdrModel"); if (!sel || document.activeElement === sel) return;
+  fillModelOptions(sel, bot().model);
 }
 
-/* ---------- model status from llama-swap ---------- */
+/* ---------- model status from llama-swap + cloud ---------- */
 let modelPoll = null;
 async function poll(){
   if (modelPoll) return modelPoll;
   modelPoll = (async () => {
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 3000);
     try {
+      const rCloud = await fetch("/api/cloud/models", { signal: controller.signal }).catch(() => null);
+      if (rCloud && rCloud.ok) {
+        const dc = await rCloud.json();
+        if (dc && Array.isArray(dc.models)) cloudModels = dc.models;
+      }
       const r = await fetch("/v1/models", { signal: controller.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (!d || !Array.isArray(d.data)) throw new Error("Invalid model list");
       models = d.data.filter(m => m && typeof m.id === "string").map(m => m.id);
       status = {}; d.data.forEach(m => { if (m && typeof m.id === "string") { const value = (m.status && m.status.value) || "unknown"; status[m.id] = value === "loaded" ? "ready" : value; } });
-      $("#swap").textContent = "SWAP ON"; $("#swap").className = "badge ok"; $("#swap").title = `${models.length} model(s) discovered`;
+      cloudModels.forEach(c => { if (c && c.id) status[c.id] = c.ready ? "ready" : "nokey"; });
+      $("#swap").textContent = "SWAP ON"; $("#swap").className = "badge ok"; $("#swap").title = `${models.length} local model(s) discovered`;
     } catch (e) {
       $("#swap").textContent = "SWAP OFF"; $("#swap").className = "badge err";
       $("#swap").title = e.name === "AbortError" ? "Model discovery timed out" : `Model discovery failed: ${e.message}`;
       status = {};
+      cloudModels.forEach(c => { if (c && c.id) status[c.id] = c.ready ? "ready" : "nokey"; });
     } finally { clearTimeout(timeout); }
     renderBots(); fillModelPicker();
   })();
@@ -1192,7 +1579,12 @@ function md(src){
   let html = "";
   esc(src).split(/```/).forEach((p, i) => {
     if (i % 2) { const nl = p.indexOf("\n");
-      if (nl >= 0 && p.slice(0, nl).trim().toLowerCase() === "kanban") { const board = kanbanHtml(p.slice(nl + 1)); if (board) { html += board; return; } } html += `<pre><button class="btn copy" type="button">Copy</button><code>${nl >= 0 ? p.slice(nl + 1) : p}</code></pre>`; return; }
+      const lang = nl >= 0 ? p.slice(0, nl).trim() : "";
+      if (nl >= 0 && lang.toLowerCase() === "kanban") { const board = kanbanHtml(p.slice(nl + 1)); if (board) { html += board; return; } }
+      const body = nl >= 0 ? p.slice(nl + 1) : p;
+      const lines = body.replace(/\n$/, "").split("\n");
+      const gutter = lines.map((_, idx) => `<span>${idx + 1}</span>`).join("");
+      html += `<div class="tactical-code"><div class="tactical-code-head"><span class="lang-pill">${esc(lang || "CODE")}</span><span class="indent-meta">INDENT GUIDES · ${lines.length} LINES</span><button class="btn copy" type="button">Copy</button></div><div class="code-table"><div class="code-gutter" aria-hidden="true">${gutter}</div><pre class="code-lines"><code>${body}</code></pre></div></div>`; return; }
     let list = false;
     p.split("\n").forEach(line => {
       const h = line.match(/^(#{1,4})\s+(.*)/), li = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)/);
@@ -1301,19 +1693,27 @@ function renderBots(){
   initBotDrop();
   const wrap = $("#bots"); wrap.innerHTML = "";
   S.bots.forEach((b, i) => {
-    const st = status[b.model]; const known = models.includes(b.model);
-    const badge = !known ? ["NO MODEL","err"] : st === "ready" ? ["LOADED","ok"] : st === "starting" ? ["LOADING","busy"] : ["IDLE",""];
+    const cm = cloudMeta(b.model), isCloud = String(b.model || "").startsWith("cloud:");
+    const st = status[b.model]; const known = models.includes(b.model) || isCloud;
+    const badge = isCloud ? ((cm && cm.ready) || st === "ready" ? ["☁ CLOUD","ok"] : ["NO KEY","err"]) : !known ? ["NO MODEL","err"] : st === "ready" ? ["LOADED","ok"] : st === "starting" ? ["LOADING","busy"] : ["IDLE",""];
     const n = S.chats.filter(c => c.botId === b.id).length;
-    const el = document.createElement("button"); el.type = "button"; el.setAttribute("role","listitem");
+    const el = document.createElement("button"); el.type = "button"; el.setAttribute("aria-keyshortcuts","Alt+ArrowUp Alt+ArrowDown");
+    // Keyboard twin of drag-and-drop: Alt+Up / Alt+Down moves this bot one place.
+    el.addEventListener("keydown", e => {
+      if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+      const t = S.bots[i + (e.key === "ArrowDown" ? 1 : -1)]; e.preventDefault();
+      if (t && moveBot(b.id, t.id, e.key === "ArrowDown")){ save(); renderBots(); wrap.querySelector(`[data-bot-id="${CSS.escape(b.id)}"]`)?.focus(); }
+    });
     el.draggable = true; el.dataset.botId = b.id;
     el.addEventListener("dragstart", e => { draggingBotId = b.id; e.dataTransfer.setData("text/plain", b.id); e.dataTransfer.effectAllowed = "move"; el.classList.add("dragging"); });
     el.addEventListener("dragend", () => { draggingBotId = null; el.classList.remove("dragging"); wrap.querySelectorAll(".drop-before,.drop-after").forEach(x => x.classList.remove("drop-before","drop-after")); });
     el.className = "bot" + (b.id === S.bot ? " active" : ""); el.setAttribute("aria-pressed", b.id === S.bot);
+    el.setAttribute("aria-label", `${b.name||"Bot"}. Model ${b.model||"none"}, ${badge[0].toLowerCase()}. ${n} chats.`);
     applyBotColor(el, b);
     el.innerHTML = `<header>${b.avatar ? `<img class="bot-avatar" src="${esc(b.avatar)}" alt="">` : `<span class="bot-avatar bot-avatar-fallback">${esc((b.name||"A").slice(0,1).toUpperCase())}</span>`}<span class="ttl">${String(i+1).padStart(2,"0")} // ${esc(b.name.toUpperCase())}</span><span class="badge ${badge[1]}">${badge[0]}</span></header>
       <div class="meta"><span>MODEL</span><b>${esc(b.model)}</b><span>TEMP</span><b>${b.temperature} / top_p ${b.top_p}</b><span>CHATS</span><b>${n}</b>${skillsFor(b).length ? `<span>SKILLS</span><b>${esc(skillsFor(b).map(s => s.name).join(", "))}</b>` : ""}</div>
       <p class="desc">${esc(b.desc||"")}</p>`;
-    el.onclick = () => { S.bot = b.id; const c = S.chats.find(x => x.botId === b.id); S.chat = c ? c.id : null; save(); renderAll(); closeMenu(); };
+    el.onclick = () => { if (typeof currentPage !== "undefined" && currentPage !== "chat") showPage("chat"); if (stageView) closeStageView(false); S.bot = b.id; const c = S.chats.find(x => x.botId === b.id); S.chat = c ? c.id : null; save(); renderAll(); closeMenu(); };
     el.ondblclick = openEditor;
     wrap.appendChild(el);
   });
@@ -1356,14 +1756,148 @@ function swarmChip(c){
   const st = swarmState(c), p = swarmParts(c);
   return `<span class="chip ${st[2]}" title="${esc(p.role + " · " + st[1])}"><span aria-hidden="true">${st[0]}</span> ${esc(p.role)}<span class="sr"> · ${esc(st[1])}</span></span>`;
 }
-// State bar above the open swarm chat: shows the steps of this chat's job and where it is now.
-// In the Lead chat it also shows each bot of the run, live. A click on a bot opens that bot's chat.
+// ---------- Swarm run view: status bar, Uplink rail, stage view ----------
+// Uplink rail = where each model answers from (cloud, other machine, this PC). The backend writes one "hop" per
+// place a step tried (event swarm.route). Every status chip and rail station opens the STAGE VIEW: where it ran,
+// the answer live as the model writes it (/api/ops/swarm/live), the thinking (folded), and that step's lines.
+let cloudStatus = null;
+const WHERE_MARK = { cloud: ["☁", "the cloud (text leaves this PC)"], lan: ["⇄", "another machine on your network"], pc: ["⌂", "this PC"] };
+const HOP_STATE = { trying: ["…", "working"], ok: ["✓", "answered"], fallback: ["↷", "failed, moved on"], failed: ["✕", "failed"], nokey: ["–", "no key set"] };
 const SWARM_LEAD_STEPS = [["plan", "PLAN"], ["bots", "BOTS"], ["combine", "COMBINE"], ["tests", "TESTS"], ["review", "REVIEW"]];
 const SWARM_BOT_STEPS = [["queued", "QUEUED"], ["running", "RUNNING"], ["done", "DONE"]];
+const STAGE_HELP = { plan: "Splits the goal into one job per bot.", bots: "Each bot does its own job.", combine: "Joins the bot answers into one result.",
+  tests: "Runs any code in the result, on this PC.", review: "Checks the combined result and the test output.", bot: "This bot's own job." };
+let serverSkew = 0;  // server clock minus this clock, in seconds
+const nowS = () => Date.now() / 1000 + serverSkew;
+const fmtSecs = s => !(s >= 0) ? "" : s < 60 ? s.toFixed(s < 10 ? 1 : 0) + " s" : Math.floor(s / 60) + " min " + Math.round(s % 60) + " s";
+function swarmHop(c){
+  const r = (c && c.swarmRoutes) || {};
+  let hops = r.bot;
+  if (c && c.swarmFinal) hops = r[c.swarmPhase] || r[["review", "tests", "combine", "plan"].find(k => r[k] && r[k].length)];
+  return hops && hops.length ? hops[hops.length - 1] : null;
+}
+function whereTitle(h){ return h && WHERE_MARK[h.where] ? ` · runs on ${WHERE_MARK[h.where][1]}: ${h.label}${h.model ? " (" + h.model + ")" : ""}` : ""; }
+function whereTag(h){
+  const w = h && WHERE_MARK[h.where]; if (!w) return "";
+  return ` <span class="where" aria-hidden="true">${w[0]}</span><span class="sr">, runs on ${esc(w[1])}</span>`;
+}
+// Time a hop took, or a live counter (data-since) while it still works.
+function hopTime(h){
+  if (!h || !h.started) return "";
+  return h.state === "trying" ? `<span class="t" data-since="${h.started}">${fmtSecs(nowS() - h.started)}</span>` : `<span class="t">${fmtSecs(h.ts - h.started)}</span>`;
+}
+let uplinkOpen = (() => { try { const v = localStorage.getItem("atlas.uplinkOpen"); if (v !== null) return v === "1"; } catch {} return !matchMedia("(max-width:820px)").matches; })();
+function setUplinkOpen(open, focus){
+  uplinkOpen = !!open;
+  try { localStorage.setItem("atlas.uplinkOpen", uplinkOpen ? "1" : "0"); } catch {}
+  renderSwarmBar();
+  if (focus && uplinkOpen) $("#uplinkRail .x")?.focus();
+  else if (focus) $("#swarmBar [data-uplink]")?.focus();
+}
+function hopHtml(h){
+  const w = WHERE_MARK[h.where] || ["?", h.where || "unknown"], st = HOP_STATE[h.state] || ["", h.state || ""];
+  return `<li class="hop" data-where="${esc(h.where || "")}" data-state="${esc(h.state || "")}" title="${esc(w[1] + " · " + st[1] + (h.note ? " · " + h.note : ""))}">`
+    + `<span class="ic" aria-hidden="true">${w[0]}</span><span><span class="lbl">${esc(h.label || "")}</span>${h.model ? `<span class="m">${esc(h.model)}</span>` : ""}</span>`
+    + `<span class="st">${hopTime(h)}<span aria-hidden="true"> ${st[0]}</span><span class="sr">${esc(w[1])}, ${esc(st[1])}</span></span></li>`;
+}
+function hopsHtml(hops, empty){
+  if ((!hops || !hops.length) && empty === "") return "";
+  if (!hops || !hops.length) return `<div class="none">${esc(empty || "not started")}</div>`;
+  return `<ol class="hops">${hops.map((h, i) => (i ? `<li class="down" aria-hidden="true">↓ moved to</li>` : "") + hopHtml(h)).join("")}</ol>`;
+}
+// A station: name (a button that opens the stage view), its hops, optional children.
+function stationHtml(name, hops, cls, empty, view, extra, me){
+  const last = hops && hops.length ? hops[hops.length - 1] : null;
+  return `<li class="stn ${cls}${me ? " me" : ""}" data-where="${esc(last ? last.where : "")}"><span class="node" aria-hidden="true"></span>`
+    + `<div class="name"><button type="button" data-view="${esc(view)}" title="Show what happens in this step">${esc(name)}</button></div>${hopsHtml(hops, empty)}${extra || ""}</li>`;
+}
+function botStateClass(x){ const st = swarmState(x)[2]; return st === "ok" ? "done" : st === "busy" ? "now" : ["err", "timeout", "stall"].includes(st) ? "bad" : ""; }
+function swarmRunChats(c){
+  const run = S.chats.filter(x => x.swarmRun === c.swarmRun);
+  return { run, lead: run.find(x => x.swarmFinal), bots: run.filter(x => !x.swarmFinal) };
+}
+const hasRoutes = x => !!(x && x.swarmRoutes && Object.values(x.swarmRoutes).some(h => h && h.length));
+// The last hop of every step of a run: the base of the summary line.
+function runFinalHops(lead, bots){
+  const out = [];
+  for (const x of bots) { const h = (x.swarmRoutes || {}).bot; if (h && h.length) out.push(h); }
+  if (lead) for (const k of ["plan", "combine", "tests", "review"]) { const h = (lead.swarmRoutes || {})[k]; if (h && h.length) out.push(h); }
+  return out;
+}
+function summaryHtml(lead, bots){
+  const all = runFinalHops(lead, bots); if (!all.length) return "";
+  const n = { cloud: 0, lan: 0, pc: 0 }; let fb = 0, bad = 0;
+  for (const hops of all) { const last = hops[hops.length - 1]; if (n[last.where] !== undefined) n[last.where]++; if (last.state === "failed") bad++; fb += hops.filter(h => h.state === "fallback").length; }
+  const said = `${n.cloud} in the cloud, ${n.lan} on another machine, ${n.pc} on this PC${fb ? `, ${fb} moved after a failure` : ""}${bad ? `, ${bad} failed` : ""}`;
+  return `<p class="sum" title="${esc(said)}"><span aria-hidden="true"><b class="c">☁ ${n.cloud}</b> · <b class="l">⇄ ${n.lan}</b> · <b class="p">⌂ ${n.pc}</b>${fb ? ` · <b class="w">↷ ${fb}</b>` : ""}${bad ? ` · <b class="x">✕ ${bad}</b>` : ""}</span><span class="sr">${esc(said)}</span></p>`;
+}
+function renderUplinkRail(c){
+  const rail = $("#uplinkRail"); if (!rail) return;
+  if (!c || !c.swarmRun || !uplinkOpen) { rail.hidden = true; rail.innerHTML = ""; return; }
+  const { run, lead, bots } = swarmRunChats(c);
+  const record = run.some(hasRoutes);
+  const botEmpty = x => !record ? "" : x.swarmTaskStatus === "claimed" ? "starting" : x.swarmStatus ? "no record" : "waiting for its turn";
+  const botList = `<ol class="sub">${bots.map(x => stationHtml(swarmParts(x).role, (x.swarmRoutes || {}).bot, botStateClass(x), botEmpty(x), "bot:" + x.id, "", x.id === c.id)).join("")}</ol>`;
+  let body;
+  if (lead) {
+    const r = lead.swarmRoutes || {}, ended = !lead.swarmLive && lead.swarmStatus, ok = ended && lead.swarmStatus === "completed";
+    const now = SWARM_LEAD_STEPS.findIndex(x => x[0] === lead.swarmPhase);
+    body = SWARM_LEAD_STEPS.map(([k, name], i) => {
+      const hops = r[k], last = hops && hops.length ? hops[hops.length - 1] : null;
+      let cls = ok || i < now ? "done" : i === now ? (ended ? "bad" : "now") : "";
+      if ((last && last.state === "failed") || (k === "tests" && swarmTestsBad(lead))) cls = "bad";
+      if (k === "bots") return stationHtml("BOTS", null, cls, "", "bots:" + lead.id, botList);
+      const passed = ok || i < now;
+      const empty = !record ? "" : k === "plan" && bots.length === 1 ? "not needed (one bot)" : passed ? "no record" : i === now ? "starting" : "not started";
+      return stationHtml(name, hops, cls, empty, k + ":" + lead.id, "", lead.id === c.id && i === now);
+    }).join("");
+  } else body = botList.replace(/^<ol class="sub">|<\/ol>$/g, "");
+  const cs = cloudStatus, keys = !cs ? "" : !cs.enabled ? `<div class="keys"><span class="key off">☁ cloud off</span></div>`
+    : `<div class="keys" aria-label="Cloud keys">${Object.values(cs.providers || {}).map(p => `<span class="key ${p.key ? "on" : "off"}" title="${esc(p.label + (p.key ? " key is set · " + p.model : " has no key, so its steps use the local model"))}">☁ ${esc(p.label)} · ${p.key ? "key" : "no key"}</span>`).join("")}</div>`;
+  const note = record ? "" : `<p class="note">No connection record: this run started before Atlas saved where each model runs. Start a new run to see it.</p>`;
+  rail.innerHTML = `<h2><span aria-hidden="true">⇅</span> UPLINK<button type="button" class="x" aria-label="Hide model connections">✕</button></h2>${keys}${summaryHtml(lead, bots)}${note}<ol>${body}</ol>`
+    + `<div class="legend" aria-hidden="true"><span class="c">☁ ┊ cloud: text leaves this PC</span><span class="l">⇄ ⋮ other machine on your network</span><span class="p">⌂ │ this PC</span><span class="good">✓ answered</span><span class="wait">… working · ↷ fallback</span><span class="fail">✕ failed</span><span>Click a step to look inside.</span></div>`;
+  rail.querySelector(".x").onclick = () => setUplinkOpen(false, true);
+  rail.onkeydown = e => { if (e.key === "Escape") { e.preventDefault(); setUplinkOpen(false, true); } };
+  rail.querySelectorAll("[data-view]").forEach(el => el.onclick = () => openStageView(el.dataset.view, el));
+  rail.hidden = false;
+}
+// State bar above a swarm chat. Every chip opens the stage view of that step or bot.
+function swarmHasFallback(x){
+  return Object.values((x && x.swarmRoutes) || {}).some(hops => Array.isArray(hops) && hops.some(h => h && h.state === "fallback"));
+}
+function swarmHealthState(c, bots=[]){
+  const all = [c, ...(bots || [])].filter(Boolean);
+  if (all.some(x => x.swarmStatus === "failed" || x.swarmTimeout)) return "bad";
+  if (all.some(x => x.swarmStalled || (x.swarmFinal && swarmTestsBad(x)) || swarmHasFallback(x))) return "warn";
+  if (all.some(x => x.swarmLive || x.swarmTaskStatus === "claimed" || (x.swarmFinal && x.swarmPhase && !x.swarmStatus))) return "running";
+  if (c && c.swarmStatus === "completed") return "done";
+  return "";
+}
+function swarmProgressPct(c, bots=[]){
+  if (bots && bots.length) {
+    const done = bots.filter(x => x.swarmStatus === "completed").length;
+    if (c && c.swarmStatus === "completed") return 100;
+    return Math.max(18, Math.min(95, Math.round(((done + 0.35) / Math.max(1, bots.length)) * 100)));
+  }
+  if (!c) return 100;
+  if (c.swarmStatus === "completed") return 100;
+  if (c.swarmFinal) {
+    const phasePct = { plan: 22, bots: 55, combine: 76, tests: 88, review: 95 }[c.swarmPhase || ""];
+    return phasePct || 30;
+  }
+  return c.swarmTaskStatus === "claimed" || c.swarmLive ? 65 : 20;
+}
 function renderSwarmBar(){
   const bar = $("#swarmBar"); if (!bar) return;
   const c = chat(), b = c && swarmBadge(c);
-  if (!b) { bar.hidden = true; bar.innerHTML = ""; return; }
+  if (!b) { bar.hidden = true; bar.innerHTML = ""; bar.className = ""; bar.removeAttribute("data-health"); renderUplinkRail(null); closeStageView(false); return; }
+  if (stageView && stageView.run !== c.swarmRun) closeStageView(false);
+  const { run, lead, bots } = swarmRunChats(c);
+  const barHealth = swarmHealthState(c, c.swarmFinal ? bots : []);
+  bar.className = barHealth ? "swarm-status-row" : "";
+  if (barHealth) { bar.setAttribute("data-health", barHealth); bar.style.setProperty("--swarm-progress", swarmProgressPct(c, c.swarmFinal ? bots : []) + "%"); }
+  else { bar.removeAttribute("data-health"); bar.style.removeProperty("--swarm-progress"); }
   const steps = c.swarmFinal ? SWARM_LEAD_STEPS : SWARM_BOT_STEPS;
   const ended = !c.swarmLive && c.swarmStatus;
   let now = c.swarmFinal ? steps.findIndex(x => x[0] === c.swarmPhase) : (c.swarmTaskStatus === "claimed" || c.swarmStatus === "failed" ? 1 : 0);
@@ -1373,21 +1907,202 @@ function renderSwarmBar(){
     let cls = ok || i < now ? "done" : i === now ? (bad ? "bad" : "now") : "";
     if (ok && c.swarmFinal && x[0] === "tests" && swarmTestsBad(c)) cls = "bad";
     const mark = cls === "done" ? "✓ " : cls === "now" ? "● " : cls === "bad" ? "✕ " : "○ ";
-    return `<span class="st ${cls}">${mark}${x[1]}</span>`;
+    const view = c.swarmFinal ? x[0] + ":" + c.id : "bot:" + c.id;
+    const sel = stageView && stageView.key === view ? " sel" : "";
+    return `<button type="button" class="st ${cls}${sel}" data-view="${esc(view)}" aria-pressed="${!!sel}" title="${esc(STAGE_HELP[c.swarmFinal ? x[0] : "bot"])} Click to look inside.">${mark}${x[1]}</button>`;
   }).join("");
-  const run = S.chats.filter(x => x.swarmRun === c.swarmRun);
   const others = c.swarmFinal ? run.filter(x => !x.swarmFinal) : run.filter(x => x.swarmFinal);
-  const done = run.filter(x => !x.swarmFinal && x.swarmStatus === "completed").length, total = run.filter(x => !x.swarmFinal).length;
-  const peers = others.length ? `<span class="sep" aria-hidden="true">|</span>${c.swarmFinal ? `<span class="st">BOTS ${done}/${total}</span>` : ""}${others.map(x => {
-    const st = swarmState(x), p = swarmParts(x);
-    return `<button type="button" class="chip ${st[2]}" data-open="${esc(x.id)}" title="Open ${esc(p.role)} chat · ${esc(st[1])}"><span aria-hidden="true">${st[0]}</span> ${esc(p.role)}<span class="sr"> · ${esc(st[1])}</span></button>`;
+  const done = bots.filter(x => x.swarmStatus === "completed").length, total = bots.length;
+  const activeCount = bots.filter(x => x.swarmLive || x.swarmTaskStatus === "claimed").length;
+  const parts = swarmParts(lead || c);
+  const peers = others.length ? `<span class="sep" aria-hidden="true">|</span>${c.swarmFinal ? `<button type="button" class="st" data-view="bots:${esc(c.id)}" title="See all bots of this run">BOTS ${done}/${total}</button>` : ""}${others.map(x => {
+    const st = swarmState(x), p = swarmParts(x), view = x.swarmFinal ? (x.swarmPhase || "plan") + ":" + x.id : "bot:" + x.id;
+    return `<button type="button" class="chip ${st[2]}" data-view="${esc(view)}" title="Look inside ${esc(p.role)} · ${esc(st[1])}${esc(whereTitle(swarmHop(x)))}"><span aria-hidden="true">${st[0]}</span> ${esc(p.role)}${whereTag(swarmHop(x))}<span class="sr"> · ${esc(st[1])}</span></button>`;
   }).join("")}` : "";
-  const logs = `<button type="button" class="chip" data-botlogs title="Open this run in Operations > llama-swap > Bot Logs">LOGS</button>`;
-  bar.innerHTML = `<span class="badge ${b[1]}">${esc(b[0])}</span>${cells}${peers}${logs}${c.swarmError ? `<span class="st bad">${esc(String(c.swarmError).slice(0, 160))}</span>` : ""}`;
+  const logs = `<button type="button" class="chip" data-botlogs title="Open the unified Swarm Board">SWARM BOARD</button>`;
+  const uplink = `<button type="button" class="chip" data-uplink aria-controls="uplinkRail" aria-expanded="${uplinkOpen}" title="Show or hide where each model runs: cloud, another machine, or this PC">UPLINK ${uplinkOpen ? "▸" : "◂"}</button>`;
+  const here = swarmHop(c);
+  const workerSummary = total ? `<span class="swarm-bar-meta">${done}/${total} done${activeCount ? ` · ${activeCount} active` : ""}</span>` : "";
+  bar.innerHTML = `<div class="swarm-bar-top"><span class="badge ${b[1]}" title="${esc(whereTitle(here).replace(/^ · /, ""))}">${esc(b[0])}${whereTag(here)}</span><span class="swarm-bar-goal" title="${esc(parts.goal)}">${esc(parts.goal)}</span>${workerSummary}${logs}${uplink}</div>`
+    + `<div class="swarm-bar-steps">${cells}${peers}${c.swarmError ? `<span class="st bad">${esc(String(c.swarmError).slice(0, 160))}</span>` : ""}</div>`;
   bar.querySelector("[data-botlogs]").onclick = () => openBotLogs(c.swarmRun);
-  bar.querySelectorAll("[data-open]").forEach(el => el.onclick = () => { const t = S.chats.find(x => x.id === el.dataset.open); if (!t) return; S.bot = t.botId; S.chat = t.id; save(); renderAll(); });
+  bar.querySelector("[data-uplink]").onclick = () => setUplinkOpen(!uplinkOpen, true);
+  bar.querySelectorAll("[data-view]").forEach(el => el.onclick = () => openStageView(el.dataset.view, el));
+  renderUplinkRail(c);
+  if (stageView) renderStageView();
   bar.hidden = false;
   syncSwarmActivity(c);
+}
+// ---------- Stage view ----------
+let stageView = null;  // { key: "combine:<leadId>" | "bot:<botId>" | "bots:<leadId>", stage, conv, run }
+const swarmLive = {};  // conversation_id -> { stage: live view } from /api/ops/swarm/live
+const swarmSaved = {}; // conversation_id -> saved result (after the step ended)
+let stageTimer = null;
+function openStageView(key, trigger){
+  const [stage, conv] = String(key).split(/:(.*)/s);
+  const t = S.chats.find(x => x.id === conv); if (!t) return;
+  if (stageView && stageView.key === key) { closeStageView(true); return; }  // second click on the same chip closes it
+  stageView = { key, stage, conv, run: t.swarmRun, trigger: trigger && trigger.dataset ? trigger.dataset.view : "" };
+  renderSwarmBar();
+  pollStageView();
+  clearInterval(stageTimer); stageTimer = setInterval(pollStageView, 1500);
+  $("#stageView .back")?.focus();
+}
+function closeStageView(focus){
+  if (!stageView) return;
+  const key = stageView.trigger; stageView = null; clearInterval(stageTimer); stageTimer = null;
+  const v = $("#stageView"); if (v) { v.hidden = true; v.innerHTML = ""; }
+  const log = $("#log"); if (log) log.hidden = false;
+  if (focus !== false) { renderSwarmBar(); (key && $(`#swarmBar [data-view="${CSS.escape(key)}"]`))?.focus(); }
+}
+function stageConvs(){
+  if (!stageView) return [];
+  if (stageView.stage !== "bots") return [stageView.conv];
+  const t = S.chats.find(x => x.id === stageView.conv); return t ? swarmRunChats(t).bots.map(x => x.id) : [];
+}
+async function pollStageView(){
+  if (!stageView || document.hidden) return;
+  for (const conv of stageConvs()) {
+    try {
+      const r = await fetch(`/api/ops/swarm/live?conversation_id=${encodeURIComponent(conv)}`, { cache: "no-store" });
+      if (r.ok) { const d = await r.json(); serverSkew = (d.now || Date.now() / 1000) - Date.now() / 1000; swarmLive[conv] = d.live || {}; }
+    } catch {}
+    const t = S.chats.find(x => x.id === conv);
+    if (t && !t.swarmLive && t.swarmStatus === "completed" && !swarmSaved[conv]) {
+      try { swarmSaved[conv] = (await fetchSwarmSavedResult(conv)).result || {}; } catch { swarmSaved[conv] = {}; }
+    }
+  }
+  renderStageView();
+}
+// What the step produced: the live text, else the saved result once the run ended.
+function stageAnswer(conv, stage){
+  const live = (swarmLive[conv] || {})[stage];
+  if (live && (live.text || live.thinking || !live.done)) return { live, text: live.text || "", thinking: live.thinking || "", from: live.done ? "answer" : "live" };
+  const s = swarmSaved[conv] || {};
+  const saved = stage === "bot" ? s.answer : stage === "plan" ? (s.plan ? Object.entries(s.plan).map(([b, p]) => `**${b}**: ${p}`).join("\n\n") : "")
+    : stage === "combine" ? s.combined : stage === "tests" ? (s.tests || {}).text : stage === "review" ? s.review : "";
+  return saved ? { text: String(saved), thinking: "", from: "saved" } : null;
+}
+function stageBlock(conv, stage, title){
+  const t = S.chats.find(x => x.id === conv); if (!t) return "";
+  const hops = (t.swarmRoutes || {})[stage] || [];
+  const a = stageAnswer(conv, stage), lines = parseSwarmLog((t.messages.find(m => m.swarmLog) || {}).content).filter(e => stage === "bot" || e.stage === stage);
+  const writing = a && a.from === "live";
+  const words = a && a.text ? a.text.trim().split(/\s+/).length : 0;
+  const head = writing ? `<span class="live-dot" aria-hidden="true"></span> Writing now · <span data-since="${a.live.started}">${fmtSecs(nowS() - a.live.started)}</span> · ${words} words`
+    : a ? `${a.from === "saved" ? "Saved answer" : "Answer"} · ${words} words${a.live && a.live.started ? " · took " + fmtSecs(a.live.updated - a.live.started) : ""}` : "";
+  const answer = !a ? `<p class="none">${t.swarmLive || !t.swarmStatus ? "Nothing written yet. The text shows here while the model writes it." : "No text was kept for this step (Atlas restarted, or the step did not run)."}</p>`
+    : (a.thinking ? `<details class="think" data-k="think:${esc(conv)}"${writing && !a.text ? " open" : ""}><summary>THINKING · ${a.thinking.trim().split(/\s+/).length} words</summary><div class="think-text">${esc(a.thinking)}</div></details>` : "")
+      + (stage === "tests" ? `<pre class="out">${esc(a.text)}</pre>` : writing ? `<div class="out stream">${md(a.text)}<span class="caret" aria-hidden="true">▍</span></div>` : `<div class="out">${md(a.text)}</div>`);
+  return `<section class="sv-block"><h3>${esc(title)}${t.swarmFinal ? "" : ` <button type="button" class="btn" data-openchat="${esc(t.id)}">OPEN CHAT</button>`}</h3>`
+    + `<p class="help">${esc(STAGE_HELP[stage] || "")}</p>${hops.length ? hopsHtml(hops) : ""}`
+    + `<div class="sv-answer"><div class="sv-head" aria-live="off">${head}</div>${answer}</div>`
+    + (lines.length ? `<details class="sv-steps" data-k="steps:${esc(conv)}"${!a ? " open" : ""}><summary>WHAT HAPPENED · ${lines.length} lines</summary>${timelineHtml(lines, false, conv)}</details>` : "")
+    + `</section>`;
+}
+function renderStageView(){
+  const v = $("#stageView"), log = $("#log"); if (!v || !stageView) return;
+  const t = S.chats.find(x => x.id === stageView.conv); if (!t) { closeStageView(false); return; }
+  const keepScroll = v.scrollTop, atBottom = v.scrollHeight - v.scrollTop - v.clientHeight < 40;
+  const name = stageView.stage === "bot" ? swarmParts(t).role : (SWARM_LEAD_STEPS.find(x => x[0] === stageView.stage) || [0, stageView.stage.toUpperCase()])[1];
+  const body = stageView.stage === "bots" ? swarmRunChats(t).bots.map(x => stageBlock(x.id, "bot", swarmParts(x).role)).join("") || `<p class="none">This run has no bots.</p>`
+    : stageBlock(stageView.conv, stageView.stage, stageView.stage === "bot" ? swarmParts(t).role : name);
+  const html = `<div class="sv-top"><button type="button" class="btn back">← BACK TO LOG</button><strong>${esc(name)}</strong><span class="usage-muted">Esc closes</span></div>${body}`;
+  if (v.dataset.key === stageView.key && v.dataset.html === html && !v.hidden) return;  // nothing new: keep focus, scroll and open sections
+  // Keep what the reader opened or closed, and the focused control, across the redraw.
+  const open = stageView.open || (stageView.open = {});
+  v.querySelectorAll("details[data-k]").forEach(d => { open[d.dataset.k] = d.open; });
+  const fa = document.activeElement, focusKey = fa && v.contains(fa) ? (fa.classList.contains("back") ? ".back" : fa.closest("details[data-k]") ? `details[data-k="${CSS.escape(fa.closest("details[data-k]").dataset.k)}"] > summary` : "") : "";
+  v.innerHTML = html; v.dataset.html = html; v.dataset.key = stageView.key; timelineBind(v);
+  v.querySelectorAll("details[data-k]").forEach(d => { if (d.dataset.k in open) d.open = open[d.dataset.k]; });
+  if (focusKey) v.querySelector(focusKey)?.focus();
+  v.querySelector(".back").onclick = () => closeStageView(true);
+  v.querySelectorAll("[data-openchat]").forEach(el => el.onclick = () => { const x = S.chats.find(y => y.id === el.dataset.openchat); if (!x) return; closeStageView(false); S.bot = x.botId; S.chat = x.id; save(); renderAll(); });
+  v.hidden = false; if (log) log.hidden = true;
+  v.scrollTop = atBottom && v.querySelector(".stream") ? v.scrollHeight : keepScroll;
+}
+// Esc closes the stage view from anywhere, except while typing in the message box (it has its own Esc).
+document.addEventListener("keydown", e => { if (e.key === "Escape" && stageView && !e.defaultPrevented && !e.target.closest("textarea,input,select")) { e.preventDefault(); closeStageView(true); } });
+// One ticker updates every live counter (rail hops and stage view) without a re-render.
+setInterval(() => document.querySelectorAll("[data-since]").forEach(el => { el.textContent = fmtSecs(nowS() - Number(el.dataset.since)); }), 1000);
+// ---------- Swarm log as a timeline ----------
+// The stored log is markdown lines "**time** [who] (problem) text". It is parsed back into entries, so old chats look new too.
+const SWARM_STAGE_KEYS = ["plan", "bots", "combine", "tests", "review"];
+function parseSwarmLog(content){
+  let stage = "";
+  return String(content || "").split(/\n\n(?=\*\*[^*\n]{3,14}\*\* )/).map(p => {
+    const m = /^\*\*([^*\n]{3,14})\*\* (?:\[([^\]\n]{1,60})\] )?(\(problem\) )?([\s\S]*)$/.exec(p.trim());
+    if (!m) return null;
+    const text = m[4].trim(), st = /^Stage (\d) of 5/.exec(text);
+    if (st) stage = SWARM_STAGE_KEYS[+st[1] - 1] || stage;
+    let kind = m[3] ? "bad" : /did not work|did not answer|did not finish|ran out of time|went wrong|failed|No model could|tests FAILED/i.test(text) ? "warn"
+      : /in the cloud|leaves this PC/.test(text) ? "cloud" : /^Done\b|got an answer back|Plan ready|tests PASSED|^I saved|is saved as a file/.test(text) ? "ok"
+      : /It is my turn now|can take a minute|I am asking the AI model|^My job:/.test(text) ? "quiet" : "";
+    return { time: m[1], who: (m[2] || "").replace(/^10x:\s*/i, ""), text, stage: m[2] ? "bots" : stage, divider: !!st, kind };
+  }).filter(Boolean);
+}
+const WHO_COLORS = 6;
+const whoClass = who => "w" + ([...who].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % WHO_COLORS);
+const KIND_MARK = { bad: ["✕", "problem"], warn: ["!", "warning"], cloud: ["☁", "cloud"], ok: ["✓", "done"], quiet: ["·", ""], "": ["·", ""] };
+const swarmTimelineOpen = Object.create(null);
+function timelineEntriesHtml(entries, keyPrefix){
+  let prev = "";
+  return `<ol class="tl">${entries.map((e, i) => {
+    const mark = KIND_MARK[e.kind] || KIND_MARK[""], same = e.who === prev; prev = e.who;
+    const first = e.text.split("\n")[0].slice(0, 160), words = e.text.toLowerCase();
+    const kind = /\btool\b|mcp/.test(words) ? "TOOL" : /test|assert|validation/.test(words) ? "TEST" : /command|exec|process/.test(words) ? "EXECUTION" : /think|reason/.test(words) ? "THINKING SUMMARY" : /task|agent|bot/.test(words) ? "TASK" : "STEP";
+    const expandable = e.text.length > first.length || e.text.includes("\n");
+    const detailKey = `${keyPrefix}:event:${i}`;
+    const body = expandable
+      ? `<details data-tl-key="${esc(detailKey)}"><summary><span class="tl-kind">${kind}</span>${esc(first)} …</summary><div class="tl-nested"><div class="tl-md">${md(e.text)}</div></div></details>`
+      : `<div class="tl-text"><span class="tl-kind">${kind}</span>${esc(first)}</div>`;
+    return `<li class="tl-e k-${e.kind || "info"}${same ? " same" : ""}${expandable ? "" : " tl-leaf"}"><time>${esc(e.time)}</time><span class="tl-mark" aria-hidden="true">${mark[0]}</span>`
+      + `${e.who && !same ? `<span class="tl-who ${whoClass(e.who)}">${esc(e.who)}</span>` : ""}${mark[1] ? `<span class="sr">${mark[1]}: </span>` : ""}${body}</li>`;
+  }).join("")}</ol>`;
+}
+function timelineBind(host){
+  host.querySelectorAll("details[data-tl-key]").forEach(el=>{
+    const key=el.dataset.tlKey;
+    if(key in swarmTimelineOpen) el.open=swarmTimelineOpen[key]; else swarmTimelineOpen[key]=el.open;
+    el.addEventListener("toggle",()=>{swarmTimelineOpen[key]=el.open;});
+  });
+}
+function timelineHtml(entries, dividers, keyPrefix="run"){
+  if(!dividers) return timelineEntriesHtml(entries.filter(e=>!e.divider),keyPrefix);
+  const groups=[]; let current=null;
+  for(const e of entries){
+    if(e.divider){
+      current={stage:e.stage,label:e.text.replace(/^Stage (\d) of 5:\s*/,"STAGE $1/5 · "),entries:[]};groups.push(current);
+    }else{
+      if(!current){current={stage:"",label:"RUN SETUP",entries:[]};groups.push(current);}
+      current.entries.push(e);
+    }
+  }
+  return `<ol class="tl tl-groups">${groups.map((g,i)=>{
+    const key=`${keyPrefix}:stage:${g.stage||"setup"}:${i}`;
+    const stageButton=g.stage?`<button class="tl-open-stage" type="button" data-stage="${esc(g.stage)}">OPEN STAGE DETAILS</button>`:"";
+    return `<li class="tl-stage-group"><details data-tl-key="${esc(key)}"><summary><span>${esc(g.label)} · ${g.entries.length} steps</span></summary>${stageButton}${timelineEntriesHtml(g.entries,key)}</details></li>`;
+  }).join("")}</ol>`;
+}
+let swarmLogFilter = "all";
+function renderSwarmTimeline(c, m){
+  const all = parseSwarmLog(m.content);
+  const shown = all.filter(e => swarmLogFilter === "all" ? true : swarmLogFilter === "problems" ? ["bad", "warn"].includes(e.kind) || e.divider : e.kind !== "quiet");
+  const d = document.createElement("div"); d.className = "msg assistant swarm-tl"; applyBotColor(d, bot());
+  const nProb = all.filter(e => ["bad", "warn"].includes(e.kind)).length;
+  const f = (k, label) => `<button type="button" class="btn" data-f="${k}" aria-pressed="${swarmLogFilter === k}">${label}</button>`;
+  d.innerHTML = `<div class="who"><span>RUN LOG // ${all.length} lines${nProb ? ` · ${nProb} problem${nProb > 1 ? "s" : ""}` : ""}</span><span class="tl-filters" role="group" aria-label="Show lines">${f("all", "ALL")}${f("main", "HIDE ROUTINE")}${f("problems", "PROBLEMS")}</span></div>`
+    + (shown.length ? timelineHtml(shown, true, c.id) : `<p class="none">No lines match this filter.</p>`);
+  timelineBind(d);
+  const copy = document.createElement("button"); copy.type = "button"; copy.className = "btn copy-message"; copy.textContent = "COPY LOG";
+  copy.onclick = async () => { const ok = await copyTextToClipboard(String(m.content || "")); copy.textContent = ok ? "COPIED" : "COPY FAILED"; setTimeout(() => copy.textContent = "COPY LOG", 1400); };
+  d.querySelector(".who").appendChild(copy);
+  d.querySelectorAll("[data-f]").forEach(el => el.onclick = () => { swarmLogFilter = el.dataset.f; renderLog(); });
+  const lead = c.swarmFinal ? c : swarmRunChats(c).lead;
+  d.querySelectorAll("[data-stage]").forEach(el => el.onclick = e => { e.preventDefault(); e.stopPropagation(); openStageView((c.swarmFinal ? el.dataset.stage : "bot") + ":" + c.id, el); });
+  if (logBatchFrag) { logBatchFrag.appendChild(d); return d; }
+  const log = $("#log"); const e = log.querySelector(".empty"); if (e) e.remove();
+  log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
 }
 // The activity line ("Done · Response finished") shows the open swarm chat's backend state, not the /swarm request.
 function syncSwarmActivity(c){
@@ -1406,10 +2121,10 @@ function openBotLogs(run){
   const f = $("#llama-iframe"); if (f) f.src = "http://127.0.0.1:8091/ui/#/atlas-bot-logs" + (run ? "?run=" + encodeURIComponent(run) : "");
 }
 let chatTab = "chats";
-function setChatTab(t){ chatTab = t; renderChats(); }
+function setChatTab(t){ chatTab = t; if (typeof currentPage !== "undefined" && currentPage !== "chat") showPage("chat"); renderChats(); }
 $("#tabChats").addEventListener("click", () => setChatTab("chats"));
 $("#tabSwarm").addEventListener("click", () => setChatTab("swarm"));
-function openChatRow(c){ S.bot = c.botId; S.chat = c.id; save(); renderAll(); closeMenu(); }
+function openChatRow(c){ if (typeof currentPage !== "undefined" && currentPage !== "chat") showPage("chat"); if (stageView) closeStageView(false); S.bot = c.botId; S.chat = c.id; save(); renderAll(); closeMenu(); }
 // SWARM tab: one folder per run. The Swarm Lead is the parent row. The arrow shows or hides the bot chats of that run.
 // The open state is stored on the Lead chat (swarmOpen). Without a stored choice, a live run or a run with the open chat is open.
 function swarmGroups(){
@@ -1417,75 +2132,228 @@ function swarmGroups(){
   S.chats.filter(c => c.swarmRun).forEach(c => { if (!groups.has(c.swarmRun)) groups.set(c.swarmRun, []); groups.get(c.swarmRun).push(c); });
   return [...groups.entries()].map(([run, list]) => ({ run, lead: list.find(c => c.swarmFinal) || null, bots: list.filter(c => !c.swarmFinal) }));
 }
+const LOG_PAGE_SIZE = 40;
+const logVisibleCount = Object.create(null);
+let logBatchFrag = null;
+let lastChatsRenderKey = "";
+let archivedChatsOpen = false;
+function chatLastTime(c){
+  if (!c) return 0;
+  const msgs = c.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i] && msgs[i].at) return Number(msgs[i].at) || 0; }
+  return Number(c.updatedAt || c.createdAt || 0);
+}
+function fmtChatTime(ts){
+  if (!ts) return "";
+  const d = new Date(ts), now = new Date();
+  const diffMs = now - d;
+  if (diffMs >= 0 && diffMs < 60000) return "now";
+  if (diffMs >= 0 && diffMs < 3600000) return Math.floor(diffMs / 60000) + "m";
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ts >= todayStart) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (ts >= todayStart - 86400000) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+function chatGroupLabel(ts, todayStart){
+  if (!ts || ts < todayStart - 86400000) return "EARLIER";
+  if (ts >= todayStart) return "TODAY";
+  return "YESTERDAY";
+}
+function chatPreview(c){
+  const msgs = c && c.messages || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (!m || typeof m.content !== "string") continue;
+    const line = m.content.replace(/```[\s\S]*?```/g, "[code]").replace(/[#>*_`]+/g, "").replace(/\s+/g, " ").trim();
+    if (line) return (m.role === "user" ? "You: " : "") + line.slice(0, 80);
+  }
+  return "No messages yet";
+}
+function chatMatchesQuery(c, q){
+  if (!q) return true;
+  const len = c.messages ? c.messages.length : 0;
+  const key = String(c.title || "") + "|" + len;
+  if (!c._searchKey || c._searchKey !== key) {
+    c._searchKey = key;
+    c._searchText = (String(c.title || "") + "\n" + (c.messages || []).map(m => typeof m.content === "string" ? m.content : "").join("\n")).toLowerCase();
+  }
+  return c._searchText.includes(q);
+}
+function makeGroupHdr(label, count){
+  const h = document.createElement("li"); h.className = "chat-group-hdr";
+  h.innerHTML = `<span>${esc(label)}</span><span class="cnt">${count}</span>`;
+  return h;
+}
 function renderSwarmTree(ul){
-  const groups = swarmGroups();
-  if (!groups.length) { ul.innerHTML = `<li class="none">No swarm runs yet. Type /swarm and a goal in a chat.</li>`; return; }
-  groups.forEach(g => {
+  const allGroups = swarmGroups();
+  if (!allGroups.length) { ul.innerHTML = `<li class="none">No swarm runs yet. Type /swarm or /hyperswarm and a goal in a chat.</li>`; return; }
+  const q = chatQuery.trim().toLowerCase();
+  const groups = q ? allGroups.filter(g => {
     const all = (g.lead ? [g.lead] : []).concat(g.bots);
-    const head = g.lead || g.bots[0];
-    const stored = g.lead && typeof g.lead.swarmOpen === "boolean" ? g.lead.swarmOpen : null;
-    const open = stored !== null ? stored : all.some(c => c.swarmLive || c.id === S.chat);
-    const done = g.bots.filter(c => c.swarmStatus === "completed").length;
-    const p = swarmParts(head), kids = g.lead ? g.bots : g.bots.slice(1);
-    const li = document.createElement("li"); li.className = "swarm-run" + (head.id === S.chat ? " active" : "");
-    const listId = "swarm-steps-" + String(g.run).replace(/[^\w-]/g, "");
-    li.innerHTML = `<button class="caret" type="button" aria-expanded="${open}" aria-controls="${listId}" aria-label="${open ? "Hide" : "Show"} the ${kids.length} bot chats of this swarm run"${kids.length ? "" : " disabled"}>${open ? "▾" : "▸"}</button>`
-      + `<button class="open" type="button" title="${esc(head.title)}">${g.lead ? swarmChip(g.lead) : `<span class="chip">SWARM</span>`}<span class="t">${esc(p.goal)}</span><span class="n" title="Bots done">${done}/${g.bots.length}</span></button>`
-      + `<button class="del" type="button" aria-label="Delete this swarm run (${all.length} chats)">x</button>`;
-    const toggle = () => { if (!g.lead) return; g.lead.swarmOpen = !open; save(); renderChats(); };
-    li.querySelector(".caret").onclick = toggle;
-    li.querySelector(".open").onclick = () => { if (g.lead && !open) g.lead.swarmOpen = true; openChatRow(head); };
-    li.querySelector(".open").addEventListener("keydown", e => { if (e.key === "ArrowRight" && !open) { e.preventDefault(); toggle(); } if (e.key === "ArrowLeft" && open) { e.preventDefault(); toggle(); } });
-    li.querySelector(".del").onclick = () => {
-      if (!confirm(`Delete this swarm run? This removes ${all.length} chats (the Swarm Lead and its bots).`)) return;
-      const ids = new Set(all.map(c => c.id)); S.chats = S.chats.filter(x => !ids.has(x.id)); if (ids.has(S.chat)) S.chat = null; save(); renderAll();
-    };
-    ul.appendChild(li);
-    if (!open || !kids.length) return;
-    const sub = document.createElement("li"); sub.className = "swarm-steps";
-    const inner = document.createElement("ul"); inner.id = listId; inner.setAttribute("aria-label", "Bot chats of this swarm run");
-    kids.forEach(c => {
-      const k = document.createElement("li"); if (c.id === S.chat) k.className = "active";
-      const kp = swarmParts(c);
-      k.innerHTML = `<button class="open" type="button" title="${esc(c.title)}">${swarmChip(c)}<span class="t">${esc(kp.task || kp.goal)}</span></button><button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
-      k.querySelector(".open").onclick = () => openChatRow(c);
-      k.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; save(); renderAll(); };
-      inner.appendChild(k);
+    return all.some(c => {
+      const p = swarmParts(c);
+      return p.goal.toLowerCase().includes(q) || p.role.toLowerCase().includes(q) || p.task.toLowerCase().includes(q) || String(c.swarmStatus || "").toLowerCase().includes(q);
     });
-    sub.appendChild(inner); ul.appendChild(sub);
-  });
+  }) : allGroups;
+  if (q && !groups.length) { ul.innerHTML = `<li class="usage-muted" style="padding:8px">No swarm runs match "${esc(chatQuery.trim())}".</li>`; return; }
+  const active = groups.filter(g => (g.lead ? [g.lead] : []).concat(g.bots).some(c => c.swarmLive || c.swarmTaskStatus === "claimed"));
+  const recent = groups.filter(g => !active.includes(g));
+  const frag = document.createDocumentFragment();
+  const boardHdr = document.createElement("li"); boardHdr.className = "chat-group-hdr";
+  boardHdr.innerHTML = `<span>SWARM RUNS (${groups.length})</span><button type="button" class="btn" id="openSwarmBoardBtn" style="padding:2px 8px;font-size:10px" title="Open the unified Swarm Board">SWARM BOARD ↗</button>`;
+  boardHdr.querySelector("#openSwarmBoardBtn").onclick = () => openBotLogs((chat() && chat().swarmRun) || "");
+  frag.appendChild(boardHdr);
+  const appendGroups = (list, label) => {
+    if (!list.length) return;
+    if (active.length && recent.length) frag.appendChild(makeGroupHdr(label, list.length));
+    list.forEach(g => {
+      const all = (g.lead ? [g.lead] : []).concat(g.bots);
+      const head = g.lead || g.bots[0];
+      const stored = g.lead && typeof g.lead.swarmOpen === "boolean" ? g.lead.swarmOpen : null;
+      const open = stored !== null ? stored : all.some(c => c.swarmLive || c.id === S.chat);
+      const done = g.bots.filter(c => c.swarmStatus === "completed").length;
+      const p = swarmParts(head), kids = g.lead ? g.bots : g.bots.slice(1);
+      const runHealth = swarmHealthState(g.lead || head, g.bots);
+      const li = document.createElement("li"); li.className = "swarm-run" + (runHealth ? " swarm-status-row" : "") + (head.id === S.chat ? " active" : "");
+      if (runHealth) { li.setAttribute("data-health", runHealth); li.style.setProperty("--swarm-progress", swarmProgressPct(g.lead || head, g.bots) + "%"); }
+      const listId = "swarm-steps-" + String(g.run).replace(/[^\w-]/g, "");
+      li.innerHTML = `<button class="caret" type="button" aria-expanded="${open}" aria-controls="${listId}" aria-label="${open ? "Hide" : "Show"} the ${kids.length} bot chats of this swarm run"${kids.length ? "" : " disabled"}>${open ? "▾" : "▸"}</button>`
+        + `<button class="open" type="button" title="${esc(head.title)}">${g.lead ? swarmChip(g.lead) : `<span class="chip">SWARM</span>`}<span class="t">${esc(p.goal)}</span><span class="n" title="Bots done">${done}/${g.bots.length}</span></button>`
+        + `<button class="del" type="button" aria-label="Delete this swarm run (${all.length} chats)">x</button>`;
+      const toggle = () => { if (!g.lead) return; g.lead.swarmOpen = !open; lastChatsRenderKey = ""; save(); renderChats(); };
+      li.querySelector(".caret").onclick = toggle;
+      li.querySelector(".open").onclick = () => { if (g.lead && !open) g.lead.swarmOpen = true; openChatRow(head); };
+      li.querySelector(".open").addEventListener("keydown", e => { if (e.key === "ArrowRight" && !open) { e.preventDefault(); toggle(); } if (e.key === "ArrowLeft" && open) { e.preventDefault(); toggle(); } });
+      li.querySelector(".del").onclick = () => {
+        if (!confirm(`Delete this swarm run? This removes ${all.length} chats (the Swarm Lead and its bots).`)) return;
+        const ids = new Set(all.map(c => c.id)); S.chats = S.chats.filter(x => !ids.has(x.id)); if (ids.has(S.chat)) S.chat = null; lastChatsRenderKey = ""; save(); renderAll();
+      };
+      frag.appendChild(li);
+      if (!open || !kids.length) return;
+      const sub = document.createElement("li"); sub.className = "swarm-steps";
+      const inner = document.createElement("ul"); inner.id = listId; inner.setAttribute("aria-label", "Bot chats of this swarm run");
+      kids.forEach(c => {
+        const kHealth = swarmHealthState(c);
+        const k = document.createElement("li"); k.className = (kHealth ? "swarm-status-row" : "") + (c.id === S.chat ? (kHealth ? " active" : "active") : "");
+        if (kHealth) { k.setAttribute("data-health", kHealth); k.style.setProperty("--swarm-progress", swarmProgressPct(c) + "%"); }
+        const kp = swarmParts(c);
+        k.innerHTML = `<button class="open" type="button" title="${esc(c.title)}">${swarmChip(c)}<span class="t">${esc(kp.task || kp.goal)}</span></button><button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
+        k.querySelector(".open").onclick = () => openChatRow(c);
+        k.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; lastChatsRenderKey = ""; save(); renderAll(); };
+        inner.appendChild(k);
+      });
+      sub.appendChild(inner); frag.appendChild(sub);
+    });
+  };
+  appendGroups(active, "ACTIVE RUNS");
+  appendGroups(recent, "RECENT RUNS");
+  ul.replaceChildren(frag);
+}
+function toggleChatArchive(c){
+  c.archived = !c.archived;
+  lastChatsRenderKey = "";
+  save();
+  fetch("/api/conversations/" + encodeURIComponent(c.id) + "/archive", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archived: !!c.archived })
+  }).catch(() => {});
+  renderChats();
+}
+function makeChatRowEl(c){
+  const li = document.createElement("li");
+  li.className = "chat-row" + (c.id === S.chat ? " active" : "") + (c.pinned ? " pinned" : "") + (c.archived ? " archived" : "");
+  const t = fmtChatTime(chatLastTime(c));
+  const badge = c.atomic ? `<span class="chat-badge">ATOMIC</span>` : (c.knowledgeCapsules && c.knowledgeCapsules.length ? `<span class="chat-badge">STUDY</span>` : "");
+  const archLabel = c.archived ? "Unarchive" : "Archive";
+  li.innerHTML = `<button class="open" type="button" title="${esc(c.title)}"><span class="chat-row-top">${badge}<span class="chat-row-title">${c.atomic ? "↳ " : ""}${esc(c.title || "New chat")}</span>${t ? `<span class="chat-row-time">${esc(t)}</span>` : ""}</span><span class="chat-row-preview">${esc(chatPreview(c))}</span></button>`
+    + `<button class="pin" type="button" aria-pressed="${!!c.pinned}" aria-label="${c.pinned ? "Unpin" : "Pin"} chat ${esc(c.title)}" title="${c.pinned ? "Unpin chat" : "Pin chat"}">${c.pinned ? "★" : "☆"}</button>`
+    + `<button class="arch" type="button" aria-pressed="${!!c.archived}" aria-label="${archLabel} chat ${esc(c.title)}" title="${archLabel} chat">${c.archived ? "↩" : "▤"}</button>`
+    + `<button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
+  li.querySelector(".open").onclick = () => openChatRow(c);
+  li.querySelector(".pin").onclick = () => { c.pinned = !c.pinned; lastChatsRenderKey = ""; save(); renderChats(); };
+  li.querySelector(".arch").onclick = () => toggleChatArchive(c);
+  li.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; lastChatsRenderKey = ""; save(); renderAll(); };
+  return li;
 }
 function renderChats(){
   renderSwarmBar();
   const b = bot(); $("#chatsTitle").textContent = "02 // CHATS: " + b.name.toUpperCase();
-  const ul = $("#chats"); ul.innerHTML = "";
+  const ul = $("#chats");
   ["Chats", "Swarm"].forEach(n => { const t = $("#tab" + n); if (t) t.setAttribute("aria-selected", String((n === "Swarm") === (chatTab === "swarm"))); });
+  const q = chatQuery.trim().toLowerCase();
+  const sig = chatTab === "swarm"
+    ? "swarm|" + S.chat + "|" + q + "|" + S.chats.filter(c => c.swarmRun).map(c => `${c.id}:${c.swarmStatus}:${c.swarmPhase}:${!!c.swarmLive}:${c.swarmOpen}:${c.swarmTaskStatus}`).join(",")
+    : "chats|" + b.id + "|" + S.chat + "|" + q + "|" + archivedChatsOpen + "|" + S.chats.filter(c => c.botId === b.id && !c.swarmRun).map(c => `${c.id}:${c.title}:${!!c.pinned}:${!!c.archived}:${c.messages?c.messages.length:0}:${chatLastTime(c)}`).join(",");
+  if (sig === lastChatsRenderKey && ul.childElementCount > 0) return;
+  lastChatsRenderKey = sig;
   if (chatTab === "swarm") { renderSwarmTree(ul); return; }
   // CHATS lists this bot's normal chats. Swarm chats live in the SWARM tab.
-  const q = chatQuery.trim().toLowerCase();
-  const matches = c => !q || String(c.title||"").toLowerCase().includes(q) || (c.messages||[]).some(m => typeof m.content === "string" && m.content.toLowerCase().includes(q));
-  const rows = S.chats.filter(c => c.botId === b.id && !c.swarmRun && matches(c));
+  const rows = S.chats.filter(c => c.botId === b.id && !c.swarmRun && chatMatchesQuery(c, q));
   if (q && !rows.length) { ul.innerHTML = `<li class="usage-muted" style="padding:8px">No chats match "${esc(chatQuery.trim())}".</li>`; return; }
+  if (!rows.length) { ul.innerHTML = `<li class="none">No chats yet. Click + Chat to start.</li>`; return; }
+  const now = new Date(), todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const sections = { PINNED: [], TODAY: [], YESTERDAY: [], EARLIER: [] };
+  const archivedRows = [];
   rows.forEach(c => {
-    const li = document.createElement("li"); if (c.id === S.chat) li.className = "active";
-    li.innerHTML = `<button class="open" type="button">${c.atomic ? "↳ " : ""}${esc(c.title)}${c.atomic ? " · ATOMIC" : ""}</button><button class="del" type="button" aria-label="Delete chat ${esc(c.title)}">x</button>`;
-    li.querySelector(".open").onclick = () => openChatRow(c);
-    li.querySelector(".del").onclick = () => { S.chats = S.chats.filter(x => x.id !== c.id); if (S.chat === c.id) S.chat = null; save(); renderAll(); };
-    ul.appendChild(li);
+    if (c.archived) archivedRows.push(c);
+    else if (c.pinned) sections.PINNED.push(c);
+    else sections[chatGroupLabel(chatLastTime(c), todayStart)].push(c);
   });
+  const frag = document.createDocumentFragment();
+  ["PINNED", "TODAY", "YESTERDAY", "EARLIER"].forEach(label => {
+    const list = sections[label];
+    if (!list.length) return;
+    frag.appendChild(makeGroupHdr(label, list.length));
+    list.forEach(c => frag.appendChild(makeChatRowEl(c)));
+  });
+  if (archivedRows.length) {
+    const openArch = !!q || archivedChatsOpen;
+    const hdr = document.createElement("li"); hdr.className = "chat-group-hdr arch-hdr";
+    hdr.innerHTML = `<button type="button" class="arch-toggle" aria-expanded="${openArch}"><span>${openArch ? "▾" : "▸"} ARCHIVED</span><span class="cnt">${archivedRows.length}</span></button>`;
+    hdr.querySelector(".arch-toggle").onclick = () => { archivedChatsOpen = !archivedChatsOpen; lastChatsRenderKey = ""; renderChats(); };
+    frag.appendChild(hdr);
+    if (openArch) archivedRows.forEach(c => frag.appendChild(makeChatRowEl(c)));
+  }
+  ul.replaceChildren(frag);
 }
 let liveGen = null;  // {chatId, box}: the reply being generated. It keeps running when another chat is opened.
-function renderLog(){
-  const b = bot(), c = chat(), log = $("#log"); log.innerHTML = "";
+function renderLog(preserveScroll=false){
+  const b = bot(), c = chat(), log = $("#log");
   $("#title").textContent = "03 // " + b.name.toUpperCase();
   const openOps=$("#openOpsConversation"); if(openOps)openOps.hidden=!c;
   if (!c || !c.messages.length) { log.innerHTML = `<div class="empty">${esc(b.name.toUpperCase())} // READY<br>${esc(b.desc||"")}</div>`; renderQueue(); return; }
-  c.messages.forEach((m, i) => {
-    if (c.compact && c.compact.upto === i && c.compact.summary) addCompactMark(c);
-    const el = addMsg(m.role, m.content, m.model, m.stats, m.reasoningSummary, (m.attachments||[]).map(name => ({ name, data: (m.images||[]).find(i => i.name === name)?.data })), m.at||0, m);
-    addMsgActions(el, c, i);
-  });
-  if (liveGen && liveGen.chatId === c.id) log.appendChild(liveGen.box);  // back in the chat that is still generating
+  const total = c.messages.length;
+  const limit = logVisibleCount[c.id] || LOG_PAGE_SIZE;
+  const startIdx = Math.max(0, total - limit);
+  const frag = document.createDocumentFragment();
+  if (startIdx > 0) {
+    const wrap = document.createElement("div"); wrap.className = "load-earlier-wrap";
+    const btn = document.createElement("button"); btn.type = "button"; btn.className = "btn";
+    btn.textContent = `Load earlier messages (${startIdx} more)`;
+    btn.onclick = () => {
+      const prevHeight = log.scrollHeight, prevTop = log.scrollTop;
+      logVisibleCount[c.id] = limit + LOG_PAGE_SIZE;
+      renderLog(true);
+      log.scrollTop = log.scrollHeight - prevHeight + prevTop;
+    };
+    wrap.appendChild(btn); frag.appendChild(wrap);
+  }
+  logBatchFrag = frag;
+  let prevRole = "";
+  try {
+    for (let i = startIdx; i < total; i++) {
+      const m = c.messages[i];
+      if (c.compact && c.compact.upto === i && c.compact.summary) addCompactMark(c);
+      if (m.swarmLog) { renderSwarmTimeline(c, m); prevRole = "swarm"; continue; }  // swarm runs: a readable timeline, not one text block
+      const el = addMsg(m.role, m.content, m.model, m.stats, m.reasoningSummary, (m.attachments||[]).map(name => ({ name, data: (m.images||[]).find(img => img.name === name)?.data })), m.at||0, m);
+      if (m.role && m.role === prevRole) el.classList.add("same-sender");
+      prevRole = m.role || "";
+      addMsgActions(el, c, i);
+    }
+  } finally { logBatchFrag = null; }
+  if (liveGen && liveGen.chatId === c.id) frag.appendChild(liveGen.box);  // back in the chat that is still generating
+  log.replaceChildren(frag);
+  if (!preserveScroll) log.scrollTop = log.scrollHeight;
   renderQueue();  // waiting messages go last, after the live reply
 }
 function renderAll(){ renderBots(); renderChats(); renderLog(); fillModelPicker(); syncActivityCompanion(); }
@@ -1508,7 +2376,7 @@ function applyBotColor(el, b){ const c = b && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.te
 function addMsg(role, content, model, stats, thinking, attachments=[], at=Date.now(), receipt=null){
   const d = document.createElement("div"); d.className = "msg " + role;
   if (role !== "user") applyBotColor(d, bot());
-  const th = thinking ? `<details class="think"><summary>REASONING SUMMARY // ${thinking.split(/\s+/).length} words, click to expand</summary><div class="think-text">${esc(thinking)}</div></details>` : "";
+  const th = thinking ? `<details class="think"><summary><span class="think-pill">THINKING</span> ${thinking.split(/\s+/).length} words</summary><div class="think-text">${esc(thinking)}</div></details>` : "";
   const pics = attachments.filter(a => a.data).map(a => `<img src="${a.data}" alt="${esc(a.name)}">`).join("");
   const names = attachments.filter(a => !a.data).map(a => esc(a.name)).join(", ");
   d.innerHTML = `<div class="who"><span>${role === "user" ? "YOU" : esc(bot().name.toUpperCase()) + " // " + esc((model||"").toUpperCase())}</span>${at?`<time class="msg-time">${esc(fmtMsgTime(at))}</time>`:""}${role==="user"?`<span class="msg-receipt${receipt&&receipt.readAt?" read":""}">${esc(receiptText(receipt))}</span>`:""}</div>${th}<div class="body">${role === "user" ? esc(content).replace(/\n/g,"<br>") : md(content)}</div>${pics ? `<div class="attachments">${pics}</div>` : ""}${names ? `<div class="stats">Files: ${names}</div>` : ""}${stats ? `<div class="stats">${esc(stats)}</div>` : ""}`;
@@ -1517,6 +2385,7 @@ function addMsg(role, content, model, stats, thinking, attachments=[], at=Date.n
     copy.addEventListener("click",async()=>{const ok=await copyTextToClipboard(String(content||""));copy.textContent=ok?"COPIED":"COPY FAILED";setTimeout(()=>copy.textContent="COPY RESPONSE",1400);});
     d.querySelector(".who").appendChild(copy);
   }
+  if (logBatchFrag) { logBatchFrag.appendChild(d); return d; }
   const log = $("#log"); const e = log.querySelector(".empty"); if (e) e.remove();
   log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
 }
@@ -1596,7 +2465,8 @@ function swarmWatch(c){
       const r = await fetch(`/api/ops/swarm/log?conversation_id=${encodeURIComponent(c.id)}&after=${cursor}`, { cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
-      if (c.swarmTaskStatus !== d.status || c.swarmPhase !== (d.phase || "")) { c.swarmTaskStatus = d.status; c.swarmPhase = d.phase || ""; renderChats(); }
+      const routes = d.routes || {};
+      if (c.swarmTaskStatus !== d.status || c.swarmPhase !== (d.phase || "") || JSON.stringify(c.swarmRoutes || {}) !== JSON.stringify(routes)) { c.swarmTaskStatus = d.status; c.swarmPhase = d.phase || ""; c.swarmRoutes = routes; renderChats(); }
       if (d.lines && d.lines.length) {
         let m = c.messages.find(x => x.swarmLog);
         if (!m) { m = { role: "assistant", swarmLog: true, model: "swarm log", content: "", at: Date.now() }; c.messages.push(m); }
@@ -1631,6 +2501,7 @@ async function swarmSync(){
     const r = await fetch("/api/ops/swarm/runs?limit=60&lines=1", { cache: "no-store" });
     if (!r.ok) return;
     const d = await r.json(); let changed = false;
+    if (JSON.stringify(cloudStatus) !== JSON.stringify(d.cloud || null)) { cloudStatus = d.cloud || null; changed = true; }
     for (const run of d.runs || []) for (const t of run.chats.concat(run.lead ? [run.lead] : [])) {
       const c = S.chats.find(x => x.id === t.conversation_id); if (!c) continue;
       const final = ["done", "failed", "timeout", "cancelled"].includes(t.state);
@@ -1638,6 +2509,7 @@ async function swarmSync(){
                      swarmStatus: final ? t.status : "", swarmError: t.error || "",
                      swarmTimeout: t.state === "timeout", swarmStalled: t.state === "stalled" };
       for (const k in next) if (c[k] !== next[k]) { c[k] = next[k]; changed = true; }
+      if (t.routes && JSON.stringify(c.swarmRoutes || {}) !== JSON.stringify(t.routes)) { c.swarmRoutes = t.routes; changed = true; }
       if (!final) swarmWatch(c);
     }
     if (changed) { save(); renderChats(); }
@@ -1804,8 +2676,8 @@ async function send(text, options={}){
   let readMarked = false; const markRead = () => { if (readMarked) return; readMarked = true; userMsg.readAt = Date.now(); userMsg.readBy = b.model; setReceipt(userEl, userMsg); save(); };
   const box = addMsg("assistant", "", b.model), body = box.querySelector(".body");
   liveGen = { chatId: c.id, box };
-  // live activity bar + live thinking panel
-  const act = document.createElement("div"); act.className = "activity"; act.setAttribute("role", "status");
+  // live Claude-style parent-child activity tree + live thinking panel
+  const act = document.createElement("details"); act.className = "claude-activity-tree"; act.open = true; act.setAttribute("role", "status");
   const think = document.createElement("details"); think.className = "think"; think.open = true; think.hidden = true;
   think.innerHTML = '<summary>WORKING // summary appears when ready</summary><div class="think-text"></div>';
   box.insertBefore(act, body); box.insertBefore(think, body);
@@ -1873,9 +2745,18 @@ async function send(text, options={}){
   };
   const secs = from => ((performance.now() - from) / 1000).toFixed(1);
   const draw = () => {
-    const n = nThink + nOut, rate = tFirst && n > 2 ? ` // ${(n / ((performance.now() - tFirst) / 1000)).toFixed(1)} tok/s` : "";
+    const n = nThink + nOut, rate = tFirst && n > 2 ? `${(n / ((performance.now() - tFirst) / 1000)).toFixed(1)} tok/s` : "";
     if (lastContext === breakdown && n) { breakdown.live = n; renderContextMeter(); }
-    act.innerHTML = `<span class="pulse" aria-hidden="true"></span><b>${phase}</b><span>${secs(t0)} s${nThink ? ` // thought ${nThink} tokens` : ""}${nOut ? ` // wrote ${nOut} tokens` : ""}${rate}</span>${note ? `<span>${esc(note)}</span>` : ""}`;
+    const step1Live = !tFirst;
+    const step2Live = tFirst && !nOut && nThink > 0;
+    const step3Live = nOut > 0 && phase !== "DONE" && phase !== "ERROR" && phase !== "STOPPED";
+    const badgeTxt = phase === "DONE" ? "ALL PASSED" : phase === "ERROR" ? "FAILED" : phase === "STOPPED" ? "STOPPED" : "LIVE";
+    const stepsHtml = [
+      `<li class="activity-step${step1Live ? " step-live" : ""}"><details class="step-details"><summary><span class="step-kind">MODEL</span><span class="step-title">${esc(b.model)}</span><span class="step-arg-preview">${esc(note || (tFirst ? "Prompt loaded & context ready" : phase))}</span><span class="step-dur">${tFirst ? secs(t0 - (tFirst - t0)) + " s ✓" : secs(t0) + " s"}</span></summary></details></li>`,
+      nThink ? `<li class="activity-step${step2Live ? " step-live" : ""}"><details class="step-details"><summary><span class="step-kind">THINK</span><span class="step-title">reasoning_trace</span><span class="step-arg-preview">${nThink} tokens</span><span class="step-dur">${step2Live ? "LIVE ●" : "✓"}</span></summary></details></li>` : "",
+      (nOut || phase === "DONE" || phase === "ERROR") ? `<li class="activity-step${step3Live ? " step-live" : phase === "ERROR" ? " step-err" : ""}"><details class="step-details"><summary><span class="step-kind verify">STREAM</span><span class="step-title">${esc(phase)}</span><span class="step-arg-preview">${nOut} tokens${rate ? " · " + rate : ""}</span><span class="step-dur">${secs(t0)} s</span></summary></details></li>` : ""
+    ].filter(Boolean).join("");
+    act.innerHTML = `<summary><svg class="ico ico-sm caret-ico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg><span class="tree-label">${esc(phase)} // ${esc(b.model)}</span><span class="tree-badge">${badgeTxt}</span><span class="tree-summary-meta">${secs(t0)} s${rate ? " · " + rate : ""}</span></summary><ul class="activity-children">${stepsHtml}</ul>`;
   };
   const timer = setInterval(() => {
     if (!tFirst) {
@@ -1964,9 +2845,10 @@ async function send(text, options={}){
 }
 
 /* ---------- bot editor ---------- */
+function defaultBotAvatar(name){ return "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="100%" height="100%" fill="#282135"/><text x="50%" y="58%" text-anchor="middle" fill="#c084fc" font-size="25" font-family="monospace">${(name||"A").slice(0,1).toUpperCase()}</text></svg>`); }
 function openEditor(){
-  const b = bot(), sel = $("#fModel"); sel.innerHTML = "";
-  [...new Set([...models, b.model])].forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m; sel.appendChild(o); });
+  const b = bot(), sel = $("#fModel");
+  fillModelOptions(sel, b.model);
   const fsk = $("#fSkills"); fsk.querySelectorAll("label,.hint").forEach(l => l.remove());
   (S.skills || []).forEach(s => {
     const l = document.createElement("label");
@@ -1975,7 +2857,7 @@ function openEditor(){
   });
   if (!(S.skills || []).length) fsk.insertAdjacentHTML("beforeend", '<span class="hint">No skills yet. Use the Skills button in the header to add some.</span>');
   $("#fName").value = b.name; sel.value = b.model; $("#fImageSupport").value = ["vision","text-only"].includes(b.imageSupport)?b.imageSupport:"unknown"; $("#fDesc").value = b.desc || ""; $("#fSystem").value = b.system || ""; $("#fDocs").value = b.docs || "";
-  $("#fAvatarPreview").src = b.avatar || "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56"><rect width="100%" height="100%" fill="#282135"/><text x="50%" y="58%" text-anchor="middle" fill="#c084fc" font-size="25" font-family="monospace">${(b.name||"A").slice(0,1).toUpperCase()}</text></svg>`); $("#fAvatarFile").value=""; $("#fAvatarStatus").textContent="PNG, JPEG or WebP · max 2 MB"; $("#fTemp").value = b.temperature; $("#fTopP").value = b.top_p; $("#fMax").value = b.max_tokens || 2048; $("#fContext").value = b.context_length || 32768; $("#fColor").value = b.color || "#a77bff";
+  $("#fAvatarPreview").src = b.avatar || defaultBotAvatar(b.name); $("#fAvatarFile").value=""; $("#fAvatarStatus").textContent="PNG, JPEG or WebP · max 2 MB"; $("#fTemp").value = b.temperature; $("#fTopP").value = b.top_p; $("#fMax").value = b.max_tokens || 2048; $("#fContext").value = b.context_length || 32768; $("#fColor").value = b.color || "#a77bff";
   $("#dlgTitle").textContent = "EDIT // " + b.name.toUpperCase(); $("#dlg").showModal();
 }
 $("#fModel").addEventListener("change",()=>{ $("#fImageSupport").value="unknown"; });
@@ -1985,7 +2867,7 @@ $("#fAvatarFile").addEventListener("change", async e => {
   $("#fAvatarStatus").textContent="Saving avatar…";
   try{const bytes=new Uint8Array(await file.arrayBuffer());let raw="";for(let i=0;i<bytes.length;i+=0x8000)raw+=String.fromCharCode(...bytes.subarray(i,i+0x8000));const r=await fetch("/api/bot-avatar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bot_id:bot().id,mime:file.type,base64:btoa(raw)})});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||"Upload failed");bot().avatar=d.url;save();$("#fAvatarPreview").src=d.url;renderBots();$("#fAvatarStatus").textContent="Avatar saved for this bot.";}catch(err){$("#fAvatarStatus").textContent="Avatar upload failed: "+err.message;}
 });
-$("#fAvatarRemove").addEventListener("click",()=>{bot().avatar="";save();$("#fAvatarPreview").removeAttribute("src");$("#fAvatarStatus").textContent="Default avatar will be used.";renderBots();});
+$("#fAvatarRemove").addEventListener("click",()=>{bot().avatar="";save();$("#fAvatarPreview").src=defaultBotAvatar(bot().name);$("#fAvatarStatus").textContent="Default avatar will be used.";renderBots();});
 $("#botForm").addEventListener("submit", e => {
   if (e.submitter && e.submitter.value === "cancel") return;
   const b = bot();
@@ -2172,17 +3054,32 @@ $("#teamForm").addEventListener("submit", e => {
   setTimeout(() => teamRun(goal, team, rounds), 0);
 });
 
+$("#backgroundBtn").onclick = () => { $("#backgroundDlg").showModal(); $("#backgroundGoal").focus(); };
+$("#backgroundForm").addEventListener("submit", e => {
+  if (!e.submitter || e.submitter.value !== "start") return;
+  const goal = $("#backgroundGoal").value.trim(); if (!goal) { e.preventDefault(); return; }
+  if (ctrl) { e.preventDefault(); alert("Wait for the current response to finish, then start the background run."); return; }
+  $("#backgroundGoal").value = "";
+  setTimeout(() => send("/swarm " + goal), 0);
+});
+
 
 $("#usageBtn").onclick=()=>{const p=$("#usagePanel");p.classList.toggle("open");$("#usageBtn").setAttribute("aria-expanded",p.classList.contains("open"));refreshUsage();arrangeInfoPanels(p.classList.contains('open')?'usagePanel':null);};
 $("#usageClose").onclick=()=>{$("#usagePanel").classList.remove("open");$("#usageBtn").setAttribute("aria-expanded","false");arrangeInfoPanels();};
 $("#saveUsageSettings").onclick=()=>{usage.sessionBudget=Math.max(1000,Number($("#sessionBudget").value)||100000);usage.weeklyBudget=Math.max(1000,Number($("#weeklyBudget").value)||500000);usage.autoCompactPct=Math.min(98,Math.max(50,Number($("#autoCompactPct").value)||80));saveUsage();refreshUsage();};
 $("#compactNow").onclick=()=>runSlash("/compact");
 $("#memoryBtn").onclick=()=>toggleMemoryPanel();
+$("#syncBtn").onclick=()=>toggleSyncPanel();
+$("#syncClose").onclick=()=>toggleSyncPanel(false);
+$("#syncPanel").addEventListener("keydown",e=>{if(e.key==="Escape"){e.preventDefault();toggleSyncPanel(false);}});
+$("#syncProject").addEventListener("change",loadSync);
+$("#syncForm").onsubmit=async e=>{e.preventDefault();const t=$("#syncText").value.trim();if(!t)return;try{const r=await fetch("/api/sync/note",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project:$("#syncProject").value.trim(),kind:$("#syncKind").value,text:t})});const d=await r.json();if(!d.ok)throw new Error(d.error||"HTTP "+r.status);$("#syncText").value="";await loadSync();$("#syncStatus").textContent="Saved.";}catch(err){$("#syncStatus").textContent="NOT SAVED: "+err.message;}};
 $("#memoryClose").onclick=()=>toggleMemoryPanel(false);
 $("#memoryForm").onsubmit=async e=>{e.preventDefault();const t=$("#memoryText").value.trim();if(!t)return;try{await memoryCall({action:"add",text:t});$("#memoryText").value="";$("#memoryStatus").textContent="Saved.";}catch(err){$("#memoryStatus").textContent="NOT SAVED: "+err.message;}};
 $("#memoryEnabled").onchange=async e=>{try{await memoryCall({action:"enable",enabled:e.target.checked});}catch(err){$("#memoryStatus").textContent=err.message;}};
-$("#chatSearch").addEventListener("input",e=>{chatQuery=e.target.value;renderChats();});
-$("#chatSearch").addEventListener("keydown",e=>{if(e.key==="Escape"){e.target.value="";chatQuery="";renderChats();}});
+let chatSearchT = null;
+$("#chatSearch").addEventListener("input",e=>{chatQuery=e.target.value;clearTimeout(chatSearchT);chatSearchT=setTimeout(renderChats,120);});
+$("#chatSearch").addEventListener("keydown",e=>{if(e.key==="Escape"){clearTimeout(chatSearchT);e.target.value="";chatQuery="";renderChats();}});
 loadMemory();
 
 /* ---------- wiring ---------- */
@@ -2459,7 +3356,7 @@ $("#wsList").addEventListener("click",async e=>{
   if (img.complete && img.naturalWidth) go(); else img.addEventListener("load", go, { once: true });
   const sync = () => active() ? start() : stop();
   document.addEventListener("visibilitychange", sync); window.addEventListener("blur", sync); window.addEventListener("focus", sync);
-  window.addEventListener("resize", sizeCanvas);
+  let resizeRaf = 0; window.addEventListener("resize", () => { if (!resizeRaf) resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; sizeCanvas(); }); });
 })();
 
 // Voice dictation. Engine "local" records audio and sends it to a Whisper model served by llama-swap
@@ -2578,8 +3475,27 @@ $("#form").addEventListener("dragleave", () => { $("#form").style.borderTopColor
 $("#form").addEventListener("drop", async e => { if (!e.dataTransfer || !e.dataTransfer.files.length) return; e.preventDefault(); $("#form").style.borderTopColor = ""; const dt = e.dataTransfer; const fake = { target: { files: dt.files, value: "" } }; await $("#attach").onchange({target: fake.target}); });
 $("#log").addEventListener("click", e => {
   if (!e.target.classList.contains("copy")) return;
-  navigator.clipboard.writeText(e.target.parentElement.querySelector("code").innerText).then(() => { e.target.textContent = "Copied"; setTimeout(() => e.target.textContent = "Copy", 1200); });
+  const codeEl = e.target.closest(".tactical-code, pre")?.querySelector("code");
+  if (!codeEl) return;
+  navigator.clipboard.writeText(codeEl.innerText).then(() => { e.target.textContent = "Copied"; setTimeout(() => e.target.textContent = "Copy", 1200); });
 });
+(function initUiTheme(){
+  const KEY = "atlasUiTheme";
+  const apply = t => {
+    const theme = t === "dedsec" ? "dedsec" : "optik";
+    if (theme === "dedsec") document.documentElement.setAttribute("data-theme", "dedsec");
+    else document.documentElement.removeAttribute("data-theme");
+    const sel = $("#uiThemeSelect"); if (sel) sel.value = theme;
+  };
+  let saved = "optik";
+  try { saved = localStorage.getItem(KEY) || "optik"; } catch {}
+  apply(saved);
+  $("#uiThemeSelect")?.addEventListener("change", e => {
+    const val = e.target.value === "dedsec" ? "dedsec" : "optik";
+    try { localStorage.setItem(KEY, val); } catch {}
+    apply(val);
+  });
+})();
 document.addEventListener("keydown", e => {
   if (e.ctrlKey && e.key.toLowerCase() === "n") { e.preventDefault(); newChat(); }
   if (e.ctrlKey && e.key.toLowerCase() === "e") { e.preventDefault(); openEditor(); }
@@ -2597,10 +3513,10 @@ let knowledgeSnapshot={items:[],distillations:[]};
 async function refreshKnowledge(){
   const r=await fetch('/api/library');if(!r.ok)throw new Error('Library unavailable');knowledgeSnapshot=await r.json();
   $('#knowledgeItems').innerHTML=(knowledgeSnapshot.items||[]).map(x=>`<label><input type="checkbox" class="knowledgePick" value="${esc(x.id)}"><span style="flex:1"><b>${esc(x.name)}</b><br><span style="color:var(--muted)">${Number(x.bytes||0).toLocaleString()} bytes · ${esc(x.extension||'source')}</span></span><button type="button" data-remove-source="${esc(x.id)}" title="Remove source">REMOVE</button></label>`).join('')||'<div class="usage-muted">No sources imported yet.</div>';
-  const list=[...new Set([...models,'mentor-dense','mentor','coder'])];const sel=$('#distillModel'),old=sel.value;sel.innerHTML=list.map(m=>`<option value="${esc(m)}">${esc(label(m))}</option>`).join('');sel.value=list.includes(old)?old:(list.includes('mentor-dense')?'mentor-dense':list[0]);
+  const list=[...new Set([...models,'mentor-dense','mentor','coder',...cloudModels.map(c=>c.id)])];const sel=$('#distillModel'),old=sel.value;sel.innerHTML=list.map(m=>`<option value="${esc(m)}">${esc(label(m))}</option>`).join('');sel.value=list.includes(old)?old:(list.includes('mentor-dense')?'mentor-dense':list[0]);
   $('#distillHistory').innerHTML=(knowledgeSnapshot.distillations||[]).map(x=>`<article style="border:1px solid var(--line);padding:8px;font:11px var(--mono)"><b>${esc(x.title)}</b><br><span class="usage-muted">${esc(x.model)} · ${new Date((x.created_at||0)*1000).toLocaleString()}</span><br><button type="button" data-attach-distill="${esc(x.id)}">ATTACH TO ACTIVE CHAT</button> <button type="button" data-export-distill="${esc(x.id)}">EXPORT STUDENT PACK</button></article>`).join('')||'<div class="usage-muted">No study capsules created yet.</div>';
 }
-$('#knowledgeBtn').addEventListener('click',async()=>{try{await refreshKnowledge();await refreshKnowledgeIndex();$('#knowledgeDlg').showModal();}catch(e){$('#distillStatus').textContent=e.message;$('#knowledgeDlg').showModal();}});
+$('#knowledgeBtn').addEventListener('click',async()=>{if(!$('#knowledgeDlg').open){if(!knowledgeSnapshot.items?.length)$('#knowledgeItems').innerHTML='<div class="usage-muted">Loading library…</div>';$('#knowledgeDlg').showModal();}try{await Promise.all([refreshKnowledge(),refreshKnowledgeIndex()]);}catch(e){$('#distillStatus').textContent=e.message;}});
 $('#knowledgeClose').addEventListener('click',()=>$('#knowledgeDlg').close());
 async function refreshKnowledgeIndex(){try{const r=await fetch('/api/library/index-status');const d=await r.json();$('#knowledgeIndexStatus').textContent=d.ok?`INDEX // ${d.mode} · ${d.chunks} chunks · ${d.embedding_model||'configure embedding_model for vector search'}`:'Index unavailable';}catch(e){$('#knowledgeIndexStatus').textContent='Index status unavailable: '+e.message;}}
 $('#knowledgeSearch').addEventListener('click',async()=>{const q=$('#knowledgeQuery').value.trim();if(!q)return;$('#knowledgeResults').textContent='Searching local knowledge…';try{const r=await fetch('/api/library/search?q='+encodeURIComponent(q)+'&limit=10');const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'Search failed');$('#knowledgeResults').innerHTML=(d.results||[]).map(x=>`<article style="border:1px solid var(--line);padding:8px;font:11px var(--mono)"><b>${esc(x.title)}</b> <span class="usage-muted">${esc(x.kind)} · ${esc(x.score)}</span><p style="white-space:pre-wrap;margin:6px 0">${esc(String(x.text||'').slice(0,900))}</p></article>`).join('')||'<div class="usage-muted">No relevant knowledge found.</div>';$('#knowledgeIndexStatus').textContent='SEARCH MODE // '+d.mode;}catch(e){$('#knowledgeResults').textContent='SEARCH FAILED: '+e.message;}});
@@ -2688,6 +3604,22 @@ $("#mcpRun").addEventListener("click",async()=>{
 });
 
 (async () => { await load(); renderAll(); resumeSwarmWatchers(); refreshUsage(); poll(); loadPlugins(); refreshMcp(false); setInterval(poll, 5000); setInterval(refreshUsage, 30000); })();
+
+/* ---------- Approval gate: Approve / Deny for tool calls that wait (mcp_chat.approval_gate) ---------- */
+let approvalKey="";
+async function pollApprovals(){
+  let rows=[];
+  try{const r=await fetch('/api/approvals');if(r.ok)rows=(await r.json()).pending||[];}catch(e){}
+  const key=rows.map(a=>a.id).join();
+  if(key===approvalKey)return; // redraw only on change, so keyboard focus stays put
+  approvalKey=key;const box=$('#approvals');box.hidden=!rows.length;
+  box.innerHTML=rows.map(a=>`<div class="approval"><b>${a.tier==='consequential'?'NEEDS YOUR OK':'FILE CHANGE'}</b><span>${esc(a.server)} / ${esc(a.tool)}</span><span class="usage-muted">${a.tier}, denied at ${new Date(a.expires*1000).toLocaleTimeString()}</span><span class="args">${esc(a.args||'no arguments')}</span><button class="btn primary" type="button" data-approval="${esc(a.id)}" data-decision="approve" aria-label="Approve ${esc(a.tool)}">APPROVE</button><button class="btn danger" type="button" data-approval="${esc(a.id)}" data-decision="deny" aria-label="Deny ${esc(a.tool)}">DENY</button></div>`).join('');
+}
+$('#approvals').addEventListener('click',async e=>{const b=e.target.closest('[data-approval]');if(!b)return;b.disabled=true;
+  try{await fetch('/api/approvals/'+encodeURIComponent(b.dataset.approval),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision:b.dataset.decision})});}catch(err){}
+  approvalKey="";pollApprovals();});
+// ponytail: 2 s poll of a local endpoint; push it over the chat stream if the poll ever costs too much.
+setInterval(pollApprovals,2000);pollApprovals();
 </script>
 
 <style>
@@ -2717,6 +3649,63 @@ html[data-dev-tools="true"] #atlasDevFab{display:block}
   </form>
 </section>
 <script>
+/* ---------- Night dev panel (headless_dev.py, docs/HEADLESS-DEV-MODE.md) ---------- */
+(()=>{
+ const g=id=>document.getElementById(id), dlg=g('nightDlg'), btn=g('nightBtn');
+ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ let last=null, timer=null, openReport='';
+ async function api(path,body){const r=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json().catch(()=>({ok:false,error:'Bad answer'}));if(!r.ok&&!d.error)d.error='HTTP '+r.status;return d;}
+ function say(t){g('ndMsg').textContent=t||'';}
+ function label(st){const m=st.state.mode||'off';btn.textContent='NIGHT DEV // '+(m==='running'?(st.state.phase||'RUNNING').toUpperCase():m.toUpperCase());}
+ function render(st){
+  last=st; label(st); const s=st.state, m=s.mode||'off', c=s.cycle, k=s.counters||{};
+  g('ndState').textContent=m.toUpperCase(); g('ndState').dataset.mode=m;
+  g('ndWhy').textContent=m==='paused'?s.pause_reason||'':(m==='off'?(s.stopped_reason||''):(st.busy?'Next check: '+st.busy:''));
+  const idx=c?st.phases.indexOf(s.phase):-1;
+  g('ndPhases').innerHTML=st.phases.map((p,i)=>`<li data-s="${idx<0?'':(i<idx?'done':i===idx?'now':'')}"${i===idx?' aria-current="step"':''}>${i+1} ${esc(p)}</li>`).join('');
+  g('ndItem').textContent=c?('Working on: '+c.item.title):'';
+  const S=st.settings; g('ndCounters').textContent=`Cycles ${k.cycles||0}/${S.max_cycles} · tokens ${k.tokens||0}/${S.night_tokens} · minutes ${k.minutes||0}/${S.night_minutes} · failures in a row ${k.failures||0}/${S.max_failures}`+(k.spend_usd?` · cloud $${k.spend_usd}`:'');
+  g('ndStart').disabled=m!=='off'; g('ndStop').disabled=m==='off'||m==='stopping';
+  g('ndRepo').textContent=st.repo||'repository not found: set it under Budgets';
+  g('ndLog').innerHTML=st.log.slice().reverse().map(r=>`<div class="${r.level==='warn'?'warn':''}">${new Date(r.ts*1000).toLocaleTimeString()} ${r.phase?'['+esc(r.phase)+'] ':''}${esc(r.message)}</div>`).join('')||'No log yet.';
+  g('ndPkgs').innerHTML=st.packages.map(p=>`<li><span class="t"><b>${esc(p.id)}</b> ${esc(p.title)}</span><span class="badge ${p.status==='approved'?'ok':p.status==='rejected'?'err':''}">${esc(p.status)}</span>`+
+   `<span class="m">Tests ${p.tests_passed?'passed':'FAILED'} · review ${esc(p.verdict)} by ${esc(p.reviewer)} · files ${esc((p.files||[]).join(', '))} · branch ${esc(p.branch)} (sandbox only)</span>`+
+   `<button class="btn" type="button" data-pkg="${esc(p.id)}" data-do="report">Report</button><button class="btn" type="button" data-pkg="${esc(p.id)}" data-do="claude">Copy for Claude</button>`+
+   (p.status==='ready'?`<button class="btn primary" type="button" data-pkg="${esc(p.id)}" data-do="approve">Approve</button><button class="btn" type="button" data-pkg="${esc(p.id)}" data-do="reject">Reject</button>`:'')+`</li>`).join('')||'<li>No packages yet.</li>';
+  g('ndQueue').innerHTML=st.queue.map(q=>`<li><span class="t"><b>${esc(q.action)}</b> (${esc(q.tier)} risk)</span><button class="btn" type="button" data-q="${esc(q.id)}">Dismiss</button><span class="m">${esc(q.why)} ${esc(q.args)}</span></li>`).join('')||'<li>Nothing waits for you.</li>';
+  g('ndBacklog').innerHTML=st.backlog.map(i=>`<li><span class="t">${esc(i.title)}</span><span class="badge">${esc(i.status)}</span>`+
+   (i.status==='open'?`<button class="btn" type="button" data-item="${esc(i.id)}" data-st="skipped">Skip</button>`:(['skipped','failed'].includes(i.status)?`<button class="btn" type="button" data-item="${esc(i.id)}" data-st="open">Reopen</button>`:''))+
+   `<span class="m">${esc(i.source)}${i.last_error?' · last error: '+esc(i.last_error):''}</span></li>`).join('')||'<li>The backlog is empty. It fills on the first start.</li>';
+  const f=g('ndBudget'); if(!f.contains(document.activeElement)){for(const el of f.elements){if(!el.name||!(el.name in S))continue;if(el.type==='checkbox')el.checked=!!S[el.name];else el.value=S[el.name];}}
+  if(c&&m!=='off')live(c.id,s.phase);
+ }
+ async function live(id,phase){try{const d=await api(`/api/ops/swarm/live?conversation_id=headless-${encodeURIComponent(id)}&stage=${encodeURIComponent(phase||'')}`);const v=Object.values(d.live||{})[0];if(v)g('ndLive').textContent=(v.text||v.thinking||'(waiting for the first words)').slice(-4000);}catch{}}
+ async function refresh(){try{const st=await api('/api/headless/status');if(st.ok)render(st);else say(st.error);}catch(e){say('Status error: '+e.message);}}
+ function poll(){clearInterval(timer);timer=setInterval(()=>{if(dlg.open||document.visibilityState==='visible')refresh();},dlg.open?2000:30000);}
+ btn.onclick=()=>{dlg.showModal();refresh();poll();g('ndStart').disabled?g('ndStop').focus():g('ndStart').focus();};
+ g('ndClose').onclick=()=>dlg.close();
+ dlg.addEventListener('close',()=>{poll();btn.focus();});
+ g('ndStart').onclick=async()=>{const d=await api('/api/headless/start',{});say(d.ok?'Started. It pauses while you chat.':d.error);refresh();};
+ g('ndStop').onclick=async()=>{const d=await api('/api/headless/stop',{});say(d.ok?'Stopping after the current step.':d.error);refresh();};
+ g('ndBudget').onsubmit=async e=>{e.preventDefault();const body={};for(const el of e.target.elements){if(!el.name)continue;body[el.name]=el.type==='checkbox'?el.checked:(el.type==='number'?Number(el.value):el.value);}
+  const d=await api('/api/headless/settings',body);g('ndBudgetMsg').textContent=d.ok?'Saved. Used from the next start.':d.error;document.activeElement.blur();refresh();};
+ g('ndAdd').onsubmit=async e=>{e.preventDefault();const t=g('ndAddTitle').value.trim();if(!t)return;const d=await api('/api/headless/backlog',{title:t});say(d.ok?'Added to the top of the backlog.':d.error);if(d.ok)g('ndAddTitle').value='';refresh();};
+ g('ndReseed').onclick=async()=>{const d=await api('/api/headless/backlog',{reseed:true});say(d.ok?`Backlog has ${d.count} items.`:d.error);refresh();};
+ dlg.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.item){const d=await api('/api/headless/item',{id:b.dataset.item,status:b.dataset.st});say(d.ok?'Saved.':d.error);return refresh();}
+  if(b.dataset.q){const d=await api('/api/headless/queue',{id:b.dataset.q,decision:'dismiss'});say(d.ok?'Dismissed. It will not run.':d.error);return refresh();}
+  const id=b.dataset.pkg, act=b.dataset.do; if(!id)return;
+  if(act==='approve'||act==='reject'){if(act==='approve'&&!confirm('Approve package '+id+'? This only marks it. Nothing is merged or pushed.'))return;
+   const d=await api('/api/headless/package',{id,decision:act});say(d.ok?`Package ${id} ${d.package.status}.`:d.error);return refresh();}
+  const d=await api(`/api/headless/package?id=${encodeURIComponent(id)}&file=${act}`);if(!d.ok)return say(d.error);
+  if(act==='claude'){try{await navigator.clipboard.writeText(d.text);return say('Copied. Paste it into a Claude Code session.');}catch{say('Copy did not work. Select the text below.');}}
+  const r=g('ndReport'),key=id+act;if(openReport===key&&!r.hidden){r.hidden=true;openReport='';return;}
+  openReport=key;r.hidden=false;r.textContent=d.text;r.focus();
+ });
+ refresh();poll();
+})();
+</script>
+<script>
 (()=>{
  if(new URLSearchParams(location.search).get('dev')==='1')document.documentElement.dataset.devTools='true';
  const $=id=>document.getElementById(id), panel=$('atlasDevPanel'); let current=null, poller=null;
@@ -2736,28 +3725,61 @@ html[data-dev-tools="true"] #atlasDevFab{display:block}
 let currentPage = "chat";
 function showPage(page) {
   currentPage = page;
-  const chatView = $("#log").parentElement;
+  const mainEl = $("#log")?.closest("main");
+  const chatStage = $("#chatStage");
+  const filesBar = $("#files");
+  const sendForm = $("#form");
+  const swarmBar = $("#swarmBar");
   const opsPanel = $("#opsPanel");
   const nodesPanel = $("#nodesPanel");
   const iframeEl = $("#llama-iframe");
-  // Hide all pages
-  chatView.style.display = "none";
+  // Keep <main> visible; toggle inner views so #opsPanel and #chatStage never hide <main> itself.
+  if (mainEl) mainEl.style.display = "flex";
   opsPanel.classList.remove("active");
   nodesPanel.classList.remove("active");
 
   if (page === "chat") {
-    chatView.style.display = "flex";
+    if (chatStage) chatStage.style.display = "flex";
+    if (filesBar) filesBar.style.display = "flex";
+    if (sendForm) sendForm.style.display = "flex";
+    renderSwarmBar();
+    // A reply that streams writes into the live #log. Rebuilding it now detaches that reply (looked cancelled).
+    if (!ctrl) renderLog();
   } else if (page === "ops") {
+    if (chatStage) chatStage.style.display = "none";
+    if (filesBar) filesBar.style.display = "none";
+    if (sendForm) sendForm.style.display = "none";
+    if (swarmBar) swarmBar.hidden = true;
     opsPanel.classList.add("active");
     // Load llama-swap interface via iframe
     if (!iframeEl.src) {
       iframeEl.src = "http://127.0.0.1:8091/ui/#";  // :8091 = hw_proxy (fills empty hardware fields)
     }
   } else if (page === "nodes") {
+    if (chatStage) chatStage.style.display = "none";
+    if (filesBar) filesBar.style.display = "none";
+    if (sendForm) sendForm.style.display = "none";
+    if (swarmBar) swarmBar.hidden = true;
     nodesPanel.classList.add("active");
     loadNodeMetrics();
   }
 }
+window.addEventListener("message", e => {
+  if (!e.data || typeof e.data !== "object") return;
+  if (e.data.type === "atlas:show-chat") {
+    toggleExecutionPanel(false);
+    showPage("chat");
+  } else if (e.data.type === "atlas:open-chat") {
+    toggleExecutionPanel(false);
+    const target = S.chats.find(x => x.id === e.data.conversation_id)
+      || (e.data.run_id && (S.chats.find(x => x.swarmRun === e.data.run_id && x.swarmFinal) || S.chats.find(x => x.swarmRun === e.data.run_id)));
+    if (target) openChatRow(target);
+    else showPage("chat");
+  } else if (e.data.type === "atlas:open-swarm-board") {
+    toggleExecutionPanel(false);
+    openBotLogs(e.data.run_id || "");
+  }
+});
 function loadNodeMetrics() {
   const container = $("#nodeMetrics");
   container.innerHTML = "<div style=\"color:var(--muted);padding:20px;text-align:center\">Loading node metrics...</div>";
@@ -2783,80 +3805,90 @@ function loadNodeMetrics() {
     });
 }
 
-// === EXECUTION LOG: Detailed tool calls and performance ===
-function renderExecutionLog(logs) {
+// === BOT ACTION HISTORY ===
+let executionLogs = [];
+function renderExecutionLog(logs = executionLogs) {
   const container = $("#executionLog");
-  if (!logs || logs.length === 0) {
-    container.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">No execution history yet</div>';
+  executionLogs = Array.isArray(logs) ? logs : [];
+  const errorsOnly = $("#filterErrors").checked;
+  const toolsOnly = $("#filterTools").checked;
+  const cacheOnly = $("#filterCache").checked;
+  const rows = executionLogs.filter(log => {
+    const data = log.data && typeof log.data === "object" ? log.data : {};
+    const state = String(data.status || log.status || "").toLowerCase();
+    if (errorsOnly && !log.error && !data.error && !["failed", "error"].includes(state)) return false;
+    if (toolsOnly && log.type !== "mcp.tool" && !data.tool) return false;
+    if (cacheOnly && !("cache_hit_ratio" in data) && !("cache" in data)) return false;
+    return true;
+  });
+  container.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "activity-event empty";
+    empty.textContent = executionLogs.length ? "No actions match these filters." : "No action history yet for this chat.";
+    container.appendChild(empty);
     return;
   }
 
-  container.innerHTML = '';
-  logs.forEach((log, idx) => {
-    const card = document.createElement('div');
-    card.className = `exec-card ${log.status || 'pending'}`;
-    if (log.error) card.classList.add('error');
+  const addDetail = (body, label, value) => {
+    if (value === undefined || value === null || value === "") return;
+    const section = document.createElement("details"); section.className = "exec-detail";
+    const heading = document.createElement("summary"); heading.textContent = label;
+    const copy = document.createElement("button"); copy.className = "exec-copy"; copy.type = "button"; copy.textContent = "COPY";
+    const pre = document.createElement("pre"); pre.className = "exec-value exec-code";
+    let text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    if (text.length > 24000) text = `${text.slice(0, 24000)}\n… detail shortened`;
+    pre.textContent = text;
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(pre.textContent); copy.textContent = "COPIED"; }
+      catch { copy.textContent = "COPY FAILED"; }
+      setTimeout(() => { copy.textContent = "COPY"; }, 1200);
+    });
+    section.append(heading, copy, pre); body.appendChild(section);
+  };
 
-    const timeStr = new Date(log.timestamp * 1000).toLocaleTimeString();
-    const duration = log.duration ? `${(log.duration / 1000).toFixed(2)}s` : '—';
-    const status = (log.tokens_per_sec ? `${log.tokens_per_sec.toFixed(1)} tok/s` : log.status || '—');
+  rows.forEach((log, idx) => {
+    const data = log.data && typeof log.data === "object" ? log.data : {};
+    const state = String(data.status || log.status || "recorded").toLowerCase();
+    const failed = !!(log.error || data.error) || ["failed", "error"].includes(state);
+    const card = document.createElement("article");
+    card.className = `exec-card ${failed ? "error" : ["complete", "completed", "ok", "success"].includes(state) ? "success" : "pending"}`;
+    const header = document.createElement("button"); header.type = "button"; header.className = "exec-header";
+    const body = document.createElement("div"); body.className = "exec-body"; body.hidden = true;
+    body.id = `exec-detail-${idx}`; header.setAttribute("aria-controls", body.id); header.setAttribute("aria-expanded", "false");
+    const icon = document.createElement("span"); icon.className = "exec-icon"; icon.setAttribute("aria-hidden", "true");
+    const time = document.createElement("time"); time.className = "exec-time";
+    const date = new Date(Number(log.timestamp) * 1000);
+    time.textContent = Number.isFinite(date.getTime()) ? date.toLocaleString() : "Time unknown";
+    if (Number.isFinite(date.getTime())) time.dateTime = date.toISOString();
+    const title = document.createElement("span"); title.className = "exec-tool";
+    title.textContent = String(data.tool ? [data.server, data.tool].filter(Boolean).join(" / ") : (log.message || log.label || log.type || "Bot action"));
+    const words = `${log.type || ""} ${log.label || ""} ${log.message || ""} ${data.tool || ""}`.toLowerCase();
+    const kind = /mcp\.tool|\btool\b/.test(words) ? "TOOL" : /test|assert|validation|check suite/.test(words) ? "TEST" : /exec|command|process|subprocess/.test(words) ? "EXECUTION" : /think|reason/.test(words) ? "THINKING SUMMARY" : /task|agent|swarm/.test(words) ? "TASK" : "STEP";
+    const category = document.createElement("span"); category.className = "exec-kind"; category.textContent = kind;
+    const badge = document.createElement("span"); badge.className = "exec-status"; badge.dataset.status = failed ? "failed" : state;
+    badge.textContent = failed ? "FAILED" : String(data.status || log.status || "RECORDED").replaceAll("_", " ").toUpperCase();
+    header.append(icon, category, time, title, badge);
+    header.addEventListener("click", () => { body.hidden = !body.hidden; header.setAttribute("aria-expanded", String(!body.hidden)); });
 
-    card.innerHTML = `
-      <div class="exec-header" onclick="this.parentElement.classList.toggle('expanded')">
-        <span class="exec-icon"></span>
-        <span class="exec-time">${timeStr}</span>
-        <span class="exec-tool">${log.tool || log.model || 'execution'}</span>
-        <span class="exec-status">${status}</span>
-      </div>
-      <div class="exec-body">
-        <div class="exec-section">
-          <div class="exec-section-title">Tool / Model</div>
-          <div class="exec-value">${log.tool || log.model || '—'}</div>
-          <div class="exec-section-title" style="margin-top:8px">Working Directory</div>
-          <div class="exec-value">${log.cwd || log.workspace || '—'}</div>
-        </div>
-        <div class="exec-section">
-          <div class="exec-section-title">Status</div>
-          <div class="exec-value" style="color:${log.error ? 'var(--bad)' : 'var(--ok)'}">${log.error ? 'ERROR' : 'OK'}</div>
-          <div class="exec-section-title" style="margin-top:8px">Duration</div>
-          <div class="exec-value">${duration}</div>
-        </div>
-        ${log.parameters ? `<div class="exec-section" style="grid-column:1/-1">
-          <div class="exec-section-title">Parameters</div>
-          <div class="exec-code">${Object.entries(log.parameters).map(([k,v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}</div>
-        </div>` : ''}
-        ${log.input ? `<div class="exec-section" style="grid-column:1/-1">
-          <div class="exec-section-title">Input (first 500 chars)</div>
-          <div class="exec-value">${typeof log.input === 'object' ? JSON.stringify(log.input).substring(0, 500) : String(log.input).substring(0, 500)}</div>
-        </div>` : ''}
-        ${log.output ? `<div class="exec-section" style="grid-column:1/-1">
-          <div class="exec-section-title">Output (first 500 chars)</div>
-          <div class="exec-value">${typeof log.output === 'object' ? JSON.stringify(log.output).substring(0, 500) : String(log.output).substring(0, 500)}</div>
-        </div>` : ''}
-        ${log.tokens_per_sec ? `<div class="exec-section" style="grid-column:1/-1">
-          <div class="exec-section-title">Performance</div>
-          <div class="exec-perf">
-            <div class="exec-perf-item"><div class="exec-perf-label">Token Rate</div><div class="exec-perf-value">${log.tokens_per_sec.toFixed(1)} tok/s</div></div>
-            <div class="exec-perf-item"><div class="exec-perf-label">Duration</div><div class="exec-perf-value">${duration}</div></div>
-            ${log.cache_hit_ratio ? `<div class="exec-perf-item"><div class="exec-perf-label">Cache Hit</div><div class="exec-perf-value">${(log.cache_hit_ratio * 100).toFixed(1)}%</div></div>` : ''}
-            ${log.prefill_rate ? `<div class="exec-perf-item"><div class="exec-perf-label">Prefill</div><div class="exec-perf-value">${log.prefill_rate.toFixed(1)} tok/s</div></div>` : ''}
-          </div>
-        </div>` : ''}
-        ${log.error ? `<div class="exec-section" style="grid-column:1/-1">
-          <div class="exec-section-title">Error</div>
-          <div class="exec-value" style="color:var(--bad);white-space:pre-wrap">${log.error}</div>
-        </div>` : ''}
-      </div>
-    `;
-    container.appendChild(card);
+    if (log.message) { const message = document.createElement("div"); message.className = "exec-message"; message.textContent = String(log.message); body.appendChild(message); }
+    const meta = [log.bot_name && `Bot: ${log.bot_name}`, log.model && `Model: ${log.model}`, data.server && `Service: ${data.server}`, data.tool && `Action: ${data.tool}`, log.duration && `Time: ${(Number(log.duration) / 1000).toFixed(2)} sec`].filter(Boolean).join(" · ");
+    if (meta) { const line = document.createElement("div"); line.className = "exec-message"; line.textContent = meta; body.appendChild(line); }
+    addDetail(body, "INPUT / PARAMETERS", data.arguments ?? data.input ?? data.parameters);
+    addDetail(body, "RESULT / OUTPUT", data.result ?? data.output);
+    if (log.error || data.error) addDetail(body, "ERROR", log.error || data.error);
+    const known = new Set(["arguments", "input", "parameters", "result", "output", "error", "bot_name", "model", "server", "tool", "duration_ms", "adapter_duration_ms"]);
+    const more = Object.fromEntries(Object.entries(data).filter(([key]) => !known.has(key)));
+    addDetail(body, "MORE DETAILS", more);
+    if (!body.childElementCount) { const note = document.createElement("div"); note.className = "exec-message"; note.textContent = "No extra details were saved for this action."; body.appendChild(note); }
+    card.append(header, body); container.appendChild(card);
   });
 }
 
 // Fetch real execution data from API
 async function fetchRealExecutionLog() {
   try {
-    const currentBotId = document.querySelector('[data-current-bot]')?.dataset.currentBot || '';
-    const currentChatId = document.querySelector('[data-current-chat]')?.dataset.currentChat || '';
+    const currentChatId = chat()?.id || S.chat || '';
 
     if (!currentChatId) {
       renderExecutionLog([{message: "No active chat. Select a chat to view execution details."}]);
@@ -2864,7 +3896,7 @@ async function fetchRealExecutionLog() {
     }
 
     // Fetch conversation activity (real execution data)
-    const response = await fetch(`/api/ops/conversations/${currentChatId}/activity?limit=50`);
+    const response = await fetch(`/api/ops/conversations/${encodeURIComponent(currentChatId)}/activity?limit=100`);
     if (!response.ok) {
       renderExecutionLog([{message: `API error: ${response.status}`}]);
       return;
@@ -2877,54 +3909,27 @@ async function fetchRealExecutionLog() {
     }
 
     // Transform API data to execution log format
-    const logs = data.events.map(event => {
-      const log = {
-        timestamp: event.at,
-        type: event.type,
-        label: event.label,
-        status: event.status,
-        bot_id: event.bot_id,
-        bot_name: event.bot_name,
-        model: event.model,
-        cwd: event.cwd || "F:\\APP-DEV\\projects\\atlas-chat"
-      };
-
-      // Add performance data if present
-      if (event.data) {
-        const d = event.data;
-        if (d.tokens_per_sec) log.tokens_per_sec = d.tokens_per_sec;
-        if (d.duration) log.duration = d.duration;
-        if (d.cache_hit_ratio) log.cache_hit_ratio = d.cache_hit_ratio;
-        if (d.prefill_rate) log.prefill_rate = d.prefill_rate;
-        if (d.input) log.input = d.input;
-        if (d.output) log.output = d.output;
-        if (d.parameters) log.parameters = d.parameters;
-      }
-
-      // Parse error data into human-readable format
-      if (event.error) {
-        try {
-          const err = typeof event.error === 'string' ? JSON.parse(event.error) : event.error;
-          log.error = formatErrorForChat(err);
-          log.error_json = err;
-        } catch {
-          log.error = event.error;
-        }
-      }
-
-      // Tool call details
-      if (event.type === 'mcp.tool') {
-        log.tool = event.message || 'Tool call';
-      }
-
-      return log;
-    });
+    const logs = data.events.slice().reverse().map(event => ({
+      timestamp: event.at,
+      type: event.type,
+      label: event.label,
+      message: event.message,
+      status: event.status,
+      bot_id: event.bot_id,
+      bot_name: event.bot_name,
+      model: event.model,
+      duration: event.duration,
+      error: event.error,
+      data: event.data && typeof event.data === "object" ? event.data : {}
+    }));
 
     renderExecutionLog(logs);
   } catch (e) {
     renderExecutionLog([{message: `Error loading execution log: ${e.message}`}]);
   }
 }
+
+for (const id of ["filterErrors", "filterTools", "filterCache"]) $("#" + id).addEventListener("change", () => renderExecutionLog());
 
 // Convert error JSON to human-readable format bot can parse
 function formatErrorForChat(error) {
@@ -2943,21 +3948,20 @@ function formatErrorForChat(error) {
   return parts.length > 0 ? parts.join(' | ') : JSON.stringify(error);
 }
 
-$("#executionBtn").onclick = () => {
+function toggleExecutionPanel(open) {
   const panel = $("#executionPanel");
-  if (panel.style.display === "flex") {
-    panel.style.display = "none";
-  } else {
-    panel.style.display = "flex";
-    fetchRealExecutionLog();
-  }
-};
+  if (!panel) return;
+  const show = open ?? panel.hidden;
+  panel.hidden = !show;
+  panel.classList.toggle("open", show);
+  panel.style.display = "";
+  if (show) { fetchRealExecutionLog(); $("#executionClose")?.focus(); }
+  else if (currentPage === "ops") { $("#executionBtn")?.focus(); }
+}
+$("#executionBtn").onclick = () => toggleExecutionPanel();
 $("#executionRefresh").onclick = () => fetchRealExecutionLog();
-$("#executionClose").onclick = () => $("#executionPanel").style.display = "none";
-$("#executionPanel").onclick = (e) => {if (e.target === $("#executionPanel")) $("#executionPanel").style.display = "none";};
-
-// Load on init
-fetchRealExecutionLog();
+$("#executionClose").onclick = () => toggleExecutionPanel(false);
+$("#executionPanel").onclick = (e) => { if (e.target === $("#executionPanel")) toggleExecutionPanel(false); };
 </script>
 
 

@@ -40,7 +40,7 @@
       "nsis": {
         "installMode": "currentUser",
         "template": "nsis/installer.nsi",
-        "installerHooks": "nsis/f-drive-only.nsh",
+        "installerHooks": "nsis/install-dir.nsh",
         "compression": "zlib"
       }
     }

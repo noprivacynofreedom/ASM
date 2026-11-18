@@ -96,4 +96,15 @@ class KnowledgeLibraryTests(unittest.TestCase):
         server._save_library_index({'items': [], 'distillations': []})
         with self.assertRaises(ValueError): server._library_distill({'ids': ['c' * 20]})
 
+    def test_fast_index_status_does_not_block_on_unbuilt_index(self):
+        source_id = 'f' * 20
+        os.makedirs(server.LIBRARY_DIR, exist_ok=True)
+        with open(server._library_item_path(source_id), 'w', encoding='utf-8') as f:
+            f.write('# Fast status test\nLibrary dialog must open immediately.')
+        server._save_library_index({'items': [{'id': source_id, 'name': 'fast.md'}], 'distillations': []})
+        with patch.object(server.knowledge_engine, 'build_records', side_effect=AssertionError('must not build synchronously')):
+            chunks_count, mode = server._library_index_status()
+        self.assertEqual(chunks_count, 0)
+        self.assertEqual(mode, 'ready to index')
+
 if __name__ == '__main__': unittest.main()

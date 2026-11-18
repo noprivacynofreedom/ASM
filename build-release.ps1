@@ -1,5 +1,31 @@
-param([string]$TargetRoot, [switch]$CloseApp, [switch]$SkipAppCheck)
+# -FastNsis: installer without compression. Default is ON (Fast NSIS). Pass -Compress for compressed distribution.
+# -Compress: enable NSIS compression for smaller release distribution size (slower build).
+# -HotSync: sync Python backend + chat UI directly into the live install in seconds (skip Nuitka and NSIS).
+# -BuildExe: with -HotSync, also rebuild atlas-desktop.exe incrementally (Vite + Cargo) and copy it over.
+# -Launch: with -HotSync, launch Atlas Chat after syncing.
+# -NoCoreCache: force Nuitka to recompile every core module instead of reusing build-tools/nuitka-cache.
+# -Update <branch>: first take that GitHub branch with get_update.py (its checks, never a branch switch), then build.
+# CmdletBinding: a wrong option name (for example -FastNsi) stops the build instead of being ignored.
+[CmdletBinding()]
+param([string]$TargetRoot, [switch]$CloseApp, [switch]$SkipAppCheck, [switch]$FastNsis, [switch]$Compress, [string]$Update, [switch]$HotSync, [switch]$BuildExe, [switch]$Launch, [switch]$NoCoreCache)
 $ErrorActionPreference = "Stop"
+
+if (-not $PSBoundParameters.ContainsKey('FastNsis')) {
+    $FastNsis = -not $Compress
+}
+if ($Compress) {
+    $FastNsis = $false
+}
+if ($Update) {
+    & python (Join-Path $PSScriptRoot "get_update.py") $Update
+    if ($LASTEXITCODE -ne 0) { throw "get_update.py stopped (see above). Nothing was built." }
+}
+if ($HotSync) {
+    $syncScript = Join-Path $PSScriptRoot "sync-live.ps1"
+    & $syncScript -CloseApp:$CloseApp -SkipAppCheck:$SkipAppCheck -BuildExe:$BuildExe -Launch:$Launch
+    if ($LASTEXITCODE -ne 0) { throw "sync-live.ps1 failed with exit code $LASTEXITCODE." }
+    return
+}
 $BuildTimer = [System.Diagnostics.Stopwatch]::StartNew()
 $BuildStarted = Get-Date
 Write-Host ("Build started:  {0:yyyy-MM-dd HH:mm:ss}" -f $BuildStarted) -ForegroundColor Cyan
@@ -200,6 +226,13 @@ try {
     if (!(Test-Path -LiteralPath (Join-Path $Tauri "Cargo.toml") -PathType Leaf)) {
         throw "Cargo.toml missing."
     }
+    # A fresh clone has no node_modules, so "tauri" is missing at step 4 (laptop, 2026-11-18). Install it first.
+    if (!(Test-Path -LiteralPath (Join-Path $Desktop "node_modules\.bin\tauri.cmd") -PathType Leaf)) {
+        Write-Host "node_modules missing: running npm ci in $Desktop"
+        Push-Location $Desktop
+        try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." } }
+        finally { Pop-Location }
+    }
     if (!(Test-Path -LiteralPath (Join-Path $Tauri "tauri.conf.json") -PathType Leaf)) {
         throw "Tauri configuration missing."
     }
@@ -211,6 +244,11 @@ try {
     if (!(Test-Path -LiteralPath $BundledPython -PathType Leaf)) {
         throw "Bundled Python missing: $BundledPython. It is not stored in git; copy the runtime\python folder into resources\atlas before building."
     }
+    $StrayPythonZip = Join-Path $Tauri "resources\atlas\runtime\python.zip"
+    if (Test-Path -LiteralPath $StrayPythonZip -PathType Leaf) {
+        $zipMb = [math]::Round((Get-Item -LiteralPath $StrayPythonZip).Length / 1MB)
+        Write-Host "WARNING: $StrayPythonZip ($zipMb MB) is inside resources\atlas\runtime and will be packed into the installer." -ForegroundColor Yellow
+    }
     & $BundledPython (Join-Path $Root "check-bundle.py")
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled backend check failed. Nothing was built or changed."
@@ -218,7 +256,17 @@ try {
     # The private core ships compiled (Nuitka .pyd), not as readable .py. compile_core.py makes
     # src-tauri\core-staging\atlas and tauri.core.conf.json, which points Tauri at that copy.
     Write-Host "`n===== COMPILE PRIVATE CORE (Nuitka) =====" -ForegroundColor Cyan
-    & $BundledPython (Join-Path $Root "compile_core.py")
+    $coreArgs = @((Join-Path $Root "compile_core.py"))
+    if ($NoCoreCache) {
+        $coreArgs += "--no-cache"
+    }
+    if ($FastNsis) {
+        Write-Host "FAST NSIS: installer compression is OFF (fast build default). Pass -Compress for smaller release installer." -ForegroundColor Cyan
+        $coreArgs += "--fast-nsis"
+    } else {
+        Write-Host "COMPRESSED NSIS: installer compression is ON." -ForegroundColor Yellow
+    }
+    & $BundledPython @coreArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Core compile failed. Nothing was built or changed."
     }
@@ -288,15 +336,41 @@ try {
     Write-Host "`n===== RELEASE BUILD =====" -ForegroundColor Cyan
     Write-Host "Cargo target: $env:CARGO_TARGET_DIR"
 
-    # Tauri copies resources into release\atlas but never deletes old files there. Start it empty,
-    # so the readable-core check after the build sees only this build's files.
+    # Tauri copies resources into release\atlas but never deletes old files there. Clear everything
+    # except runtime\ so the readable-core check sees only this build's files without re-deleting
+    # thousands of Python stdlib files every build.
     $ReleaseResources = Join-Path $Release "atlas"
     if (Test-Path -LiteralPath $ReleaseResources) {
-        Remove-Item -LiteralPath $ReleaseResources -Recurse -Force
+        Get-ChildItem -LiteralPath $ReleaseResources -Force | Where-Object { $_.Name -ne "runtime" } | Remove-Item -Recurse -Force
     }
     $BuildStarted = $true
+    # cargo prints progress on stderr. With "Stop", PowerShell 5.1 turns each stderr line into a
+    # terminating error when output is redirected (*>). The exit code below is the real check.
+    # Data folder baked into this build. local-build.json is private (never exported):
+    # {"data_root": "D:\\some\\folder"}. Without it the app uses %LOCALAPPDATA%\atlas-chat\data.
+    # The app uses data_root only when that folder exists on the PC that runs it.
+    $LocalBuild = Join-Path $Root "local-build.json"
+    $env:ATLAS_BUILD_DATA_ROOT = ""
+    if (Test-Path -LiteralPath $LocalBuild) {
+        $DataRoot = [string]((Get-Content -LiteralPath $LocalBuild -Raw | ConvertFrom-Json).data_root)
+        if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
+            $env:ATLAS_BUILD_DATA_ROOT = $DataRoot.Trim()
+        }
+    }
+    if ($env:ATLAS_BUILD_DATA_ROOT) {
+        Write-Host "Data folder for this build: $env:ATLAS_BUILD_DATA_ROOT (from local-build.json)"
+        if (-not (Test-Path -LiteralPath $env:ATLAS_BUILD_DATA_ROOT)) {
+            Write-Host "WARNING: that folder does not exist on this PC, so the app here uses %LOCALAPPDATA%\atlas-chat\data." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Data folder for this build: %LOCALAPPDATA%\atlas-chat\data (no local-build.json)"
+    }
+
+    $ErrorActionPreference = "Continue"
     & npm run tauri -- build --bundles nsis --config $CoreConfig
     $BuildExit = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    Remove-Item Env:ATLAS_BUILD_DATA_ROOT -ErrorAction SilentlyContinue
 
     if ($BuildExit -ne 0) {
         throw "Tauri build failed with exit code $BuildExit."
@@ -386,7 +460,7 @@ $NewInstaller = @(Get-ChildItem -LiteralPath $Nsis -Filter "*.exe" -File)[0].Ful
 $InstalledExe = Join-Path $Root "app\atlas-desktop.exe"
 Write-Host "`n===== HOW TO INSTALL AND LAUNCH THE UPDATED APP =====" -ForegroundColor Cyan
 Write-Host "1. Close Atlas Chat if it is open (also check the system tray)."
-Write-Host "2. Run the installer. It installs to F: (or %LOCALAPPDATA%\atlas-chat\app with no F: drive) and keeps your data:"
+Write-Host "2. Run the installer. New installs go to %LOCALAPPDATA%\atlas-chat\app (updates keep your existing folder) and keep your data:"
 Write-Host "   Start-Process `"$NewInstaller`""
 Write-Host "3. Launch the updated app after the installer finishes:"
 Write-Host "   Start-Process `"$InstalledExe`""

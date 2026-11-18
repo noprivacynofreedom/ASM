@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import threading
 import re
 import time
@@ -19,6 +20,111 @@ _SCHEMA_KEYS = {
     "uniqueItems", "pattern", "format", "additionalProperties", "oneOf",
     "anyOf", "allOf",
 }
+
+
+# ---------- Approval gate: every MCP/bot tool call goes through approval_gate() ----------
+# Tiers: "read" runs freely. "write" (local file changes) asks unless ATLAS_WRITE_APPROVAL=auto.
+# "consequential" (send, submit, post, delete, pay, shell, network) ALWAYS asks.
+# Any tool not listed here is "consequential". Keep this table next to new tool definitions
+# (src/mcp_commander.py, book_tools.py).
+# ponytail: keyed by tool name only, so a plugin that reuses a built-in name gets its tier.
+TOOL_TIERS = {
+    # src/mcp_commander.py
+    "atlas_project_status": "read", "list_workspace_files": "read", "read_workspace_file": "read",
+    "verify_workspace_file": "read", "git_status": "read", "git_diff": "read",
+    "atlas_list_files": "read", "atlas_read_file": "read",
+    "write_file": "write", "write_project_file": "write",
+    "web_search": "consequential",  # the query leaves this PC
+    # book_tools.py (atlas_library)
+    "list_books": "read", "read_chapter": "read", "search_book": "read",
+    # ctx_sync.py serve (shared project context)
+    "ctx_read": "read", "ctx_note": "write",
+    # browser_mcp.py (atlas_browser)
+    "browser_get_text": "read", "browser_screenshot": "read", "browser_tabs": "read", "browser_wait": "read",
+    "browser_open": "write", "browser_click": "write", "browser_type": "write", "browser_press": "write",
+    "browser_eval": "write", "browser_close": "write",
+    # test_suite_mcp.py (atlas_test_suite)
+    "test_suite_list": "read",
+    "test_suite_add": "write", "test_suite_update": "write", "test_suite_log_run": "write",
+}
+APPROVAL_TIMEOUT = 600  # seconds: 10 minutes, then the call is denied
+_SECRET_KEY_RE = re.compile(r"pass|secret|token|key|auth|cookie|credential", re.I)
+_PENDING = {}
+_PENDING_LOCK = threading.Lock()
+
+
+def tool_tier(tool_name):
+    return TOOL_TIERS.get(str(tool_name or ""), "consequential")
+
+
+def summarize_args(arguments, limit=400):
+    """Short, secret-free view of tool arguments for the prompt and the audit log."""
+    if not isinstance(arguments, dict):
+        return ""
+    parts = []
+    for key, value in arguments.items():
+        if _SECRET_KEY_RE.search(str(key)):
+            value = "[hidden]"
+        elif not isinstance(value, (int, float, bool)) and value is not None:
+            value = str(value)
+            value = value if len(value) <= 80 else value[:77] + "..."
+        parts.append(f"{key}={value}")
+    text = ", ".join(parts)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def pending_approvals():
+    with _PENDING_LOCK:
+        return [{k: row[k] for k in ("id", "server", "tool", "tier", "args", "created", "expires")}
+                for row in _PENDING.values()]
+
+
+def decide_approval(approval_id, approve):
+    """Record the user's click. Returns False when the id is unknown or already decided."""
+    with _PENDING_LOCK:
+        row = _PENDING.get(str(approval_id))
+        if not row or row["decision"]:
+            return False
+        row["decision"] = "approved" if approve else "denied"
+    row["done"].set()
+    return True
+
+
+def approval_gate(server, tool, arguments, record=None, timeout=None):
+    """Return (allowed, decision). Blocks while a call waits for Approve / Deny.
+
+    decision is "auto" (read, or write with ATLAS_WRITE_APPROVAL=auto), "approved",
+    "denied" or "timeout". Every decision goes to the audit log through record().
+    """
+    tier = tool_tier(tool)
+    args = summarize_args(arguments)
+    auto_write = os.environ.get("ATLAS_WRITE_APPROVAL", "ask").strip().lower() == "auto"
+    if tier == "read" or (tier == "write" and auto_write):
+        decision = "auto"
+    else:
+        wait = APPROVAL_TIMEOUT if timeout is None else timeout
+        now = time.time()
+        row = {"id": uuid.uuid4().hex, "server": server, "tool": tool, "tier": tier, "args": args,
+               "created": now, "expires": now + wait, "decision": None, "done": threading.Event()}
+        with _PENDING_LOCK:
+            _PENDING[row["id"]] = row
+        row["done"].wait(wait)
+        with _PENDING_LOCK:
+            _PENDING.pop(row["id"], None)
+            decision = row["decision"] or "timeout"
+            row["decision"] = decision  # a late click now finds it decided
+    if record:
+        try:
+            record({"status": "APPROVAL", "verification": "not_performed", "server": server, "tool": tool,
+                    "tier": tier, "args_summary": args, "decision": decision, "timestamp": time.time()})
+        except Exception:
+            pass  # the decision stands even when the optional audit sink fails
+    return decision in ("auto", "approved"), decision
+
+
+def denied_message(tool, decision):
+    why = "timed out after 10 minutes with no answer" if decision == "timeout" else "was denied by the user"
+    return f"The tool call '{tool}' {why}. It did not run. Do not retry it; tell the user what you wanted to do."
 
 
 class NoLiveTools(RuntimeError):
@@ -434,7 +540,10 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
                 # cause a repeated model call to execute the same operation.
                 attempted_operations.add(operation_key)
                 server_name, tool_name = target
+                allowed, decision = approval_gate(server_name, tool_name, arguments, record)
                 try:
+                    if not allowed:
+                        raise PermissionError(denied_message(tool_name, decision))
                     evidence = monitor.call_tool(server_name, tool_name, arguments, timeout=timeout)
                     if not isinstance(evidence, dict):
                         raise RuntimeError("MCP monitor returned a non-object execution result")
@@ -451,9 +560,9 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
                     error = f"{type(exc).__name__}: {exc}"
                     content = json.dumps({"error": error}, ensure_ascii=False)
                     event = {
-                        "status": "FAILED", "verification": "not_performed",
+                        "status": "FAILED" if allowed else "DENIED", "verification": "not_performed",
                         "server": server_name, "tool": tool_name,
-                        "duration_ms": None, "error": error,
+                        "duration_ms": None, "error": error, "approval": decision,
                     }
 
             event["adapter_duration_ms"] = round(

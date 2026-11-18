@@ -11,6 +11,7 @@ class FakeMonitor:
                 "result":{"content":[{"type":"text","text":"file-a.py"}]}}
 
 class MCPChatTests(unittest.TestCase):
+    @patch.dict(mcp_chat.TOOL_TIERS, {'list_files': 'read'})  # unknown tools wait for approval
     @patch('mcp_chat._post_completion')
     def test_tool_call_is_executed_then_returned_to_model(self, post):
         post.side_effect = [

@@ -1,3 +1,4 @@
+import no_real_keys  # noqa: F401  (must run before cloud_llm is imported)
 """Gemini retry and model fallback in cloud_llm. Uses a local stub server: no real network, no real keys."""
 import json
 import os

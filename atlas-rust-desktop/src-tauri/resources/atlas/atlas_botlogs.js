@@ -19,7 +19,7 @@
     code: { c: "#2dd4bf", w: "Code" }, research: { c: "#a78bfa", w: "Research" }, writing: { c: "#f9a8d4", w: "Writing" },
     data: { c: "#38bdf8", w: "Data" }, design: { c: "#fcd34d", w: "Design" }, other: { c: "#94a3b8", w: "Other" }
   };
-  var view = { filter: "all", open: {}, data: null, error: "", timer: null, titleNode: null, titleText: "" };
+  var view = { filter: "all", query: "", open: {}, catOpen: {}, data: null, lastJson: "", error: "", timer: null, searchTimer: null, titleNode: null, titleText: "" };
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
   function onPage() { return location.hash.indexOf(ROUTE) === 0; }
@@ -55,6 +55,10 @@
     "#atlas-botlogs .bl-err{margin-top:8px;color:#f87171;overflow-wrap:anywhere}",
     "#atlas-botlogs .bl-empty{color:var(--muted-foreground);text-align:center;padding:40px 0}",
     "#atlas-botlogs .bl-legend{display:flex;flex-wrap:wrap;gap:6px}",
+    "#atlas-botlogs .bl-search{background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:inherit;font:inherit;min-width:180px}",
+    "#atlas-botlogs .bl-cat-group{margin-top:6px;display:flex;flex-direction:column;gap:8px}",
+    "#atlas-botlogs .bl-cat-group>summary{cursor:pointer;display:flex;align-items:center;gap:8px;list-style:disclosure-closed}",
+    "#atlas-botlogs .bl-cat-group[open]>summary{list-style:disclosure-open}",
     "@media (max-width:640px){#atlas-botlogs{padding:12px}}",
     "@media (prefers-reduced-motion:reduce){#atlas-botlogs *{transition:none!important;animation:none!important}}"
   ].join("\n");
@@ -74,8 +78,8 @@
     ["id", "aria-describedby", "data-state", "data-active", "aria-current"].forEach(function (k) { a.removeAttribute(k); });
     a.setAttribute("href", ROUTE);
     var svg = a.querySelector("svg"); if (svg) svg.outerHTML = ICON;
-    var label = a.querySelector("span"); if (label) { label.className = ""; label.textContent = "Bot Logs"; }
-    a.setAttribute("title", "Bot Logs");
+    var label = a.querySelector("span"); if (label) { label.className = ""; label.textContent = "Swarm Board"; }
+    a.setAttribute("title", "Swarm Board");
     li.parentNode.insertBefore(item, li.nextSibling);
     markActive();
   }
@@ -95,6 +99,8 @@
       p = document.createElement("section");
       p.id = "atlas-botlogs"; p.setAttribute("aria-label", "Bot Logs"); p.hidden = true;
       p.addEventListener("click", onClick);
+      p.addEventListener("input", onInput);
+      p.addEventListener("toggle", onToggle, true);
     }
     if (p.parentNode !== inset) inset.appendChild(p);
     if (getComputedStyle(inset).position === "static") inset.style.position = "relative";
@@ -107,7 +113,7 @@
     if (on) {
       if (view.titleNode || !header) return;
       var w = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
-      for (var n = w.nextNode(); n; n = w.nextNode()) if (n.nodeValue.trim() === "Activity") { view.titleNode = n; view.titleText = n.nodeValue; n.nodeValue = "Bot Logs"; break; }
+      for (var n = w.nextNode(); n; n = w.nextNode()) if (n.nodeValue.trim() === "Activity") { view.titleNode = n; view.titleText = n.nodeValue; n.nodeValue = "Swarm Board"; break; }
     } else if (view.titleNode) { view.titleNode.nodeValue = view.titleText; view.titleNode = null; }
   }
   function route() {
@@ -125,8 +131,14 @@
   }
   function load() {
     fetch("/__atlas/bot-logs.json?limit=60&lines=60", { cache: "no-store" })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(function (d) { view.data = d; view.error = ""; render(); })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(function (raw) {
+        if (raw === view.lastJson && !view.error) return;
+        view.lastJson = raw;
+        view.data = JSON.parse(raw);
+        view.error = "";
+        render();
+      })
       .catch(function (e) { view.error = "Could not read bot logs from Atlas: " + e.message; render(); });
   }
 
@@ -156,15 +168,24 @@
       + (run.archived ? '<span class="bl-cat" style="--bl-c:' + cat.c + '">' + cat.w + " · archived</span>" : "")
       + '<span class="bl-goal">' + esc(run.goal || "(no goal saved)") + "</span>"
       + '<span class="bl-meta">' + clock(run.started) + " · bots " + done + "/" + run.chats.length + " · " + esc(run.run_id) + "</span>"
+      + '<button type="button" data-open-run="' + esc(run.run_id) + '" data-conv="' + esc(run.lead ? run.lead.conversation_id : (run.chats[0] ? run.chats[0].conversation_id : "")) + '">Open Chat</button>'
+      + '<button type="button" data-archive-run="' + esc(run.run_id) + '" aria-pressed="' + (!!run.archived) + '">' + (run.archived ? "Unarchive" : "Archive") + "</button>"
       + '<button type="button" data-toggle="' + esc(key) + '" aria-expanded="' + (!!view.open[key]) + '">' + (view.open[key] ? "Hide all logs" : "Show all logs") + "</button></div>"
       + '<div class="bl-tags">' + bots + "</div>"
       + (!view.open[key] && errs.length ? '<div class="bl-err">' + esc(errs[0].bot + ": " + errs[0].error) + "</div>" : "")
       + (view.open[key] ? run.chats.concat(run.lead ? [run.lead] : []).map(logBlock).join("") : opened)
       + "</article>";
   }
+  function matchesRun(r, q) {
+    if (!q) return true;
+    var hay = [r.goal, r.run_id, r.state, r.category].concat((r.chats || []).map(function (c) { return (c.bot || "") + " " + (c.task || ""); })).join(" ").toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }
   function render() {
     var p = document.getElementById("atlas-botlogs"); if (!p || p.hidden) return;
-    var runs = (view.data && view.data.runs) || [];
+    var allRuns = (view.data && view.data.runs) || [];
+    var q = view.query.trim().toLowerCase();
+    var runs = q ? allRuns.filter(function (r) { return matchesRun(r, q); }) : allRuns;
     var live = runs.filter(function (r) { return !r.archived; });
     var problems = runs.filter(function (r) { return ["failed", "timeout", "stalled"].indexOf(r.state) >= 0; });
     var arch = runs.filter(function (r) { return r.archived; });
@@ -182,20 +203,55 @@
     if (f === "all" || f === "archive") {
       body += "<h3>Archive</h3>";
       if (!arch.length) body += '<div class="bl-empty">Finished runs appear here, sorted by category.</div>';
+      var shownCats = 0;
       Object.keys(CATEGORY).forEach(function (k) {
         var group = arch.filter(function (r) { return r.category === k; });
         if (!group.length) return;
-        body += '<div class="bl-meta" style="margin-top:6px"><span class="bl-cat" style="--bl-c:' + CATEGORY[k].c + '">' + CATEGORY[k].w + "</span> " + group.length + " finished</div>" + group.map(card).join("");
+        var isOpen = q ? true : (k in view.catOpen ? view.catOpen[k] : shownCats === 0);
+        shownCats++;
+        body += '<details class="bl-cat-group" data-cat="' + esc(k) + '"' + (isOpen ? " open" : "") + '><summary class="bl-meta"><span class="bl-cat" style="--bl-c:' + CATEGORY[k].c + '">' + CATEGORY[k].w + "</span> " + group.length + " finished</summary>" + group.map(card).join("") + "</details>";
       });
     }
     var scroll = p.scrollTop;
-    p.innerHTML = '<div class="bl-wrap"><div class="bl-top"><h2>Bot Logs</h2><div class="bl-top" role="group" aria-label="Filter runs">' + filters + "</div>"
+    var active = document.activeElement, keepSearch = active && active.classList && active.classList.contains("bl-search");
+    var selStart = keepSearch ? active.selectionStart : null, selEnd = keepSearch ? active.selectionEnd : null;
+    p.innerHTML = '<div class="bl-wrap"><div class="bl-top"><h2>Swarm Board</h2><input type="search" class="bl-search" aria-label="Search swarm board" placeholder="Search runs…" value="' + esc(view.query) + '"><div class="bl-top" role="group" aria-label="Filter runs">' + filters + "</div>"
       + '<button type="button" data-refresh>Refresh</button></div><div class="bl-legend" aria-label="State colours">' + legend + "</div>" + body + "</div>";
     p.scrollTop = scroll;
+    if (keepSearch) { var inp = p.querySelector(".bl-search"); if (inp) { inp.focus(); if (selStart !== null) inp.setSelectionRange(selStart, selEnd); } }
+  }
+  function onInput(e) {
+    if (!e.target || !e.target.classList || !e.target.classList.contains("bl-search")) return;
+    view.query = e.target.value;
+    clearTimeout(view.searchTimer);
+    view.searchTimer = setTimeout(render, 120);
+  }
+  function onToggle(e) {
+    var d = e.target;
+    if (d && d.dataset && d.dataset.cat) view.catOpen[d.dataset.cat] = d.open;
+  }
+  function toggleRunArchive(runId) {
+    var runs = (view.data && view.data.runs) || [];
+    var run = runs.find(function (r) { return r.run_id === runId; });
+    if (!run) return;
+    var next = !run.archived;
+    run.archived = next;
+    view.lastJson = "";
+    render();
+    fetch("/api/ops/swarm/runs/" + encodeURIComponent(runId) + "/archive", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: next })
+    }).catch(function () {});
   }
   function onClick(e) {
     var t = e.target.closest("button"); if (!t) return;
     if (t.dataset.filter) { view.filter = t.dataset.filter; render(); }
+    else if (t.dataset.openRun) {
+      var msg = { type: "atlas:open-chat", run_id: t.dataset.openRun, conversation_id: t.dataset.conv || "" };
+      try { if (window.parent && window.parent !== window) window.parent.postMessage(msg, "*"); } catch (_) {}
+      try { if (window.top && window.top !== window && window.top !== window.parent) window.top.postMessage(msg, "*"); } catch (_) {}
+    }
+    else if (t.dataset.archiveRun) { toggleRunArchive(t.dataset.archiveRun); }
     else if (t.dataset.toggle) { view.open[t.dataset.toggle] = !view.open[t.dataset.toggle]; render(); }
     else if (t.hasAttribute("data-refresh")) load();
   }
