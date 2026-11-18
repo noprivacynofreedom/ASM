@@ -21,12 +21,14 @@
   --ok:#3fcf8e; --warn:#f5b041; --bad:#ff5c6c;
 }
 *{box-sizing:border-box}
-/* Deep ultraviolet scrollbar system */
-*{scrollbar-width:thin;scrollbar-color:#6d4aff #0b0814}
-*::-webkit-scrollbar{width:7px;height:7px}
-*::-webkit-scrollbar-track{background:#090610}
-*::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#9d74ff,#5b21b6);border-radius:4px}
-*::-webkit-scrollbar-thumb:hover{background:#c4a7ff}
+/* Hide scrollbars everywhere except #log (chat stream) */
+*{scrollbar-width:none;-ms-overflow-style:none}
+*::-webkit-scrollbar{display:none;width:0;height:0}
+#log{scrollbar-width:thin;scrollbar-color:#6d4aff transparent}
+#log::-webkit-scrollbar{display:block;width:6px;height:6px}
+#log::-webkit-scrollbar-track{background:transparent}
+#log::-webkit-scrollbar-thumb{background:rgba(157,116,255,.45);border-radius:3px}
+#log::-webkit-scrollbar-thumb:hover{background:#9d74ff}
 html,body{margin:0;height:100%;overflow:hidden;background-color:var(--bg);background-image:radial-gradient(circle at 14% 8%,rgba(124,58,237,.15) 0%,transparent 38%),radial-gradient(circle at 86% 14%,rgba(56,189,248,.07) 0%,transparent 36%),linear-gradient(rgba(157,116,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(157,116,255,.022) 1px,transparent 1px);background-size:100% 100%,100% 100%,30px 30px,30px 30px;color:var(--text);font:15px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
 .ico{width:14px;height:14px;stroke:currentColor;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none;display:inline-block;vertical-align:-2px}
 .ico-sm{width:12px;height:12px}
@@ -85,7 +87,7 @@ aside{background:var(--panel);border-right:1px solid var(--line);display:flex;fl
 .tabs{display:flex;gap:4px;padding:6px 12px}
 .tab{flex:1;text-align:center}
 .tab[aria-selected="true"]{border-color:var(--accent2);color:var(--accent2)}
-#swarmBar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;border-bottom:1px solid var(--line);font:11px var(--mono);flex:none;max-height:22vh;overflow:auto}
+#swarmBar{display:flex;flex-direction:column;gap:6px;padding:8px 16px;border-bottom:1px solid var(--line);font:11px var(--mono);flex:none;max-height:22vh;overflow-y:auto;overflow-x:hidden}
 #swarmBar[hidden]{display:none}
 .swarm-bar-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
 .swarm-bar-goal{flex:1 1 180px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:600}
