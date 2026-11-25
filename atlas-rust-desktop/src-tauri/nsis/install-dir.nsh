@@ -19,7 +19,8 @@ Function AtlasSetDefaultInstallDir
   !insertmacro ATLAS_FIX_DEFAULT_INSTDIR
 FunctionEnd
 
-; Silent installs skip the pages, so check the default once more here.
+; Silent installs skip the pages, so check the default once more here and refresh $OUTDIR.
 !macro NSIS_HOOK_PREINSTALL
   !insertmacro ATLAS_FIX_DEFAULT_INSTDIR
+  SetOutPath $INSTDIR
 !macroend

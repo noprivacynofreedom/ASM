@@ -1,14 +1,34 @@
-# -FastNsis: installer without compression. Default is ON (Fast NSIS). Pass -Compress for compressed distribution.
+﻿# -FastNsis: installer without compression. Default is ON (Fast NSIS). Pass -Compress for compressed distribution.
 # -Compress: enable NSIS compression for smaller release distribution size (slower build).
 # -HotSync: sync Python backend + chat UI directly into the live install in seconds (skip Nuitka and NSIS).
 # -BuildExe: with -HotSync, also rebuild atlas-desktop.exe incrementally (Vite + Cargo) and copy it over.
 # -Launch: with -HotSync, launch Atlas Chat after syncing.
 # -NoCoreCache: force Nuitka to recompile every core module instead of reusing build-tools/nuitka-cache.
 # -Update <branch>: first take that GitHub branch with get_update.py (its checks, never a branch switch), then build.
+# -Help: print when to use each flag (-HotSync, -BuildExe, -FastNsis, -Compress, -Update) and exit.
 # CmdletBinding: a wrong option name (for example -FastNsi) stops the build instead of being ignored.
 [CmdletBinding()]
-param([string]$TargetRoot, [switch]$CloseApp, [switch]$SkipAppCheck, [switch]$FastNsis, [switch]$Compress, [string]$Update, [switch]$HotSync, [switch]$BuildExe, [switch]$Launch, [switch]$NoCoreCache)
+param([string]$TargetRoot, [switch]$CloseApp, [switch]$SkipAppCheck, [switch]$FastNsis, [switch]$Compress, [string]$Update, [switch]$HotSync, [switch]$BuildExe, [switch]$Launch, [switch]$NoCoreCache, [switch]$Help)
 $ErrorActionPreference = "Stop"
+
+function Show-AtlasBuildGuide {
+    Write-Host "`n===== ATLAS BUILD & ROLLOUT GUIDE =====" -ForegroundColor Cyan
+    Write-Host "  1) Python backend / chat UI only (seconds, no rebuild):" -ForegroundColor Green
+    Write-Host "       .\build-release.ps1 -HotSync -CloseApp -Launch"
+    Write-Host "  2) React frame / tabs / Rust changed (fast local update):" -ForegroundColor Green
+    Write-Host "       .\build-release.ps1 -HotSync -BuildExe -CloseApp -Launch"
+    Write-Host "  3) Full Fast-NSIS installer (default; -FastNsis is already ON):" -ForegroundColor Green
+    Write-Host "       .\build-release.ps1 -CloseApp"
+    Write-Host "  4) Smaller compressed release installer (slower NSIS):" -ForegroundColor Green
+    Write-Host "       .\build-release.ps1 -Compress -CloseApp"
+    Write-Host "  Tip: Add -Update <branch> to any command above to pull from GitHub first." -ForegroundColor DarkGray
+    Write-Host "       Run 'python get_update.py <branch>' to see which mode your changes need." -ForegroundColor DarkGray
+}
+
+if ($Help) {
+    Show-AtlasBuildGuide
+    return
+}
 
 if (-not $PSBoundParameters.ContainsKey('FastNsis')) {
     $FastNsis = -not $Compress
@@ -16,6 +36,14 @@ if (-not $PSBoundParameters.ContainsKey('FastNsis')) {
 if ($Compress) {
     $FastNsis = $false
 }
+if ($HotSync) {
+    $ModeLabel = if ($BuildExe) { "HotSync + BuildExe (live sync + incremental Vite/Cargo exe)" } else { "HotSync (live Python/chat UI sync only — pass -BuildExe if React/Rust changed)" }
+} elseif ($Compress) {
+    $ModeLabel = "Full Release Installer (compressed NSIS)"
+} else {
+    $ModeLabel = "Full Fast-NSIS Installer (uncompressed NSIS — default)"
+}
+Write-Host ("Build mode:     {0}  (run .\build-release.ps1 -Help for flag guide)" -f $ModeLabel) -ForegroundColor Cyan
 if ($Update) {
     & python (Join-Path $PSScriptRoot "get_update.py") $Update
     if ($LASTEXITCODE -ne 0) { throw "get_update.py stopped (see above). Nothing was built." }
@@ -226,11 +254,25 @@ try {
     if (!(Test-Path -LiteralPath (Join-Path $Tauri "Cargo.toml") -PathType Leaf)) {
         throw "Cargo.toml missing."
     }
-    # A fresh clone has no node_modules, so "tauri" is missing at step 4 (laptop, 2026-11-18). Install it first.
-    if (!(Test-Path -LiteralPath (Join-Path $Desktop "node_modules\.bin\tauri.cmd") -PathType Leaf)) {
-        Write-Host "node_modules missing: running npm ci in $Desktop"
+    # A fresh clone has no node_modules, and pulling a branch that adds npm packages leaves node_modules stale.
+    $LockFile = Join-Path $Desktop "package-lock.json"
+    $LockStamp = Join-Path $Desktop "node_modules\.atlas-lock.sha256"
+    $NeedNpmCi = !(Test-Path -LiteralPath (Join-Path $Desktop "node_modules\.bin\tauri.cmd") -PathType Leaf)
+    if (-not $NeedNpmCi -and (Test-Path -LiteralPath $LockFile -PathType Leaf)) {
+        $CurHash = (Get-FileHash -LiteralPath $LockFile -Algorithm SHA256).Hash
+        $PrevHash = if (Test-Path -LiteralPath $LockStamp -PathType Leaf) { (Get-Content -LiteralPath $LockStamp -Raw).Trim() } else { "" }
+        if ($CurHash -ne $PrevHash) { $NeedNpmCi = $true }
+    }
+    if ($NeedNpmCi) {
+        Write-Host "node_modules missing or package-lock.json changed: running npm ci in $Desktop"
         Push-Location $Desktop
-        try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." } }
+        try {
+            & npm.cmd ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE." }
+            if (Test-Path -LiteralPath $LockFile -PathType Leaf) {
+                (Get-FileHash -LiteralPath $LockFile -Algorithm SHA256).Hash | Set-Content -LiteralPath $LockStamp -NoNewline
+            }
+        }
         finally { Pop-Location }
     }
     if (!(Test-Path -LiteralPath (Join-Path $Tauri "tauri.conf.json") -PathType Leaf)) {
@@ -422,6 +464,28 @@ try {
     }
 
     Write-Host "`nPrevious outputs preserved at: $BackupRoot"
+
+    # Auto-prune old release backups: keep only the 2 most recent release-output-* folders.
+    # Each one is ~3.7 GB (previous exe + bundle copies) and nothing deleted them before, so they
+    # piled up (42 folders, 136 GB, cleaned by hand on 2026-11-25). Strictly scoped: only
+    # release-output-* DIRECTORIES directly under .atlas-patch-audit are ever considered or removed.
+    # The timestamp name (yyyyMMdd-HHmmss) is fixed width, so a descending name sort is newest-first.
+    # Non-fatal: pruning never fails a verified build.
+    try {
+        $KeepBackups = 2
+        $OldBackups = @(Get-ChildItem -LiteralPath $Audit -Directory -Filter "release-output-*" -ErrorAction Stop |
+            Sort-Object Name -Descending | Select-Object -Skip $KeepBackups)
+        foreach ($Old in $OldBackups) {
+            Write-Host "Pruning old release backup: $($Old.FullName)" -ForegroundColor DarkGray
+            Remove-Item -LiteralPath $Old.FullName -Recurse -Force -ErrorAction Stop
+        }
+        if ($OldBackups.Count -gt 0) {
+            Write-Host "Kept the $KeepBackups most recent release-output backups; removed $($OldBackups.Count) older." -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "Could not prune old release backups (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 catch {
     $BuildError = $_

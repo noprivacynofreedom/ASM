@@ -28,6 +28,14 @@ class PageNeverScrolls(unittest.TestCase):
         self.assertIn("max-height", approvals)
         self.assertIn("overflow:auto", approvals)
 
+    def test_blocks_above_the_log_shrink_before_the_input_leaves_the_window(self):
+        # flex:none never shrinks: at 390x800 with 3 approval cards the form fell 96 px below main.
+        for sel in ("#approvals", "#swarmBar"):
+            css = rule(sel)
+            self.assertIn("flex:0 1 auto", css, sel)
+            self.assertIn("min-height:0", css, sel)
+            self.assertNotIn("flex:none", css, sel)
+
     def test_swarm_live_status_bar_rules(self):
         self.assertIn("@keyframes atlasSwarmSweep", HTML)
         self.assertIn("overflow:hidden", rule(".swarm-status-row"))

@@ -60,6 +60,35 @@ if (!(Test-Path -LiteralPath $DestAtlas -PathType Container)) {
     throw "Installed atlas folder missing: $DestAtlas. Run the installer once first."
 }
 
+if (-not $BuildExe) {
+    $InstalledExe = Join-Path $TargetInstall "atlas-desktop.exe"
+    if (Test-Path -LiteralPath $InstalledExe -PathType Leaf) {
+        $ExeTime = (Get-Item -LiteralPath $InstalledExe).LastWriteTimeUtc
+        $NativePaths = @(
+            (Join-Path $Desktop "src"),
+            (Join-Path $Tauri "src"),
+            (Join-Path $Desktop "package.json"),
+            (Join-Path $Desktop "vite.config.ts")
+        )
+        $NewerNative = @()
+        foreach ($p in $NativePaths) {
+            if (Test-Path -LiteralPath $p -PathType Container) {
+                $NewerNative += Get-ChildItem -LiteralPath $p -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTimeUtc -gt $ExeTime }
+            } elseif (Test-Path -LiteralPath $p -PathType Leaf) {
+                $it = Get-Item -LiteralPath $p
+                if ($it.LastWriteTimeUtc -gt $ExeTime) { $NewerNative += $it }
+            }
+        }
+        if ($NewerNative.Count -gt 0) {
+            Write-Host "`nWARNING: $($NewerNative.Count) React/Rust desktop shell file(s) are newer than your installed atlas-desktop.exe." -ForegroundColor Yellow
+            Write-Host "         Plain -HotSync only updates Python + chat UI (index.html) and will NOT rebuild desktop tabs or Rust code." -ForegroundColor Yellow
+            Write-Host "         To update the desktop shell too, run:" -ForegroundColor Yellow
+            Write-Host "           .\build-release.ps1 -HotSync -BuildExe -CloseApp -Launch" -ForegroundColor Cyan
+            Write-Host "         Or run a full Fast-NSIS installer build:  .\build-release.ps1 -CloseApp`n" -ForegroundColor Cyan
+        }
+    }
+}
+
 Write-Host "Source:  $SourceAtlas" -ForegroundColor Cyan
 Write-Host "Install: $TargetInstall" -ForegroundColor Cyan
 if ($DryRun) {
@@ -123,9 +152,24 @@ Assert-AtlasClosedForSync
 
 if ($BuildExe) {
     Write-Host "`n===== REBUILD DESKTOP EXE (Vite + Cargo incremental) =====" -ForegroundColor Cyan
-    if (!(Test-Path -LiteralPath (Join-Path $Desktop "node_modules\.bin\vite.cmd") -PathType Leaf)) {
+    $LockFile = Join-Path $Desktop "package-lock.json"
+    $LockStamp = Join-Path $Desktop "node_modules\.atlas-lock.sha256"
+    $NeedNpmCi = !(Test-Path -LiteralPath (Join-Path $Desktop "node_modules\.bin\vite.cmd") -PathType Leaf)
+    if (-not $NeedNpmCi -and (Test-Path -LiteralPath $LockFile -PathType Leaf)) {
+        $CurHash = (Get-FileHash -LiteralPath $LockFile -Algorithm SHA256).Hash
+        $PrevHash = if (Test-Path -LiteralPath $LockStamp -PathType Leaf) { (Get-Content -LiteralPath $LockStamp -Raw).Trim() } else { "" }
+        if ($CurHash -ne $PrevHash) { $NeedNpmCi = $true }
+    }
+    if ($NeedNpmCi) {
+        Write-Host "node_modules missing or package-lock.json changed: running npm ci in $Desktop" -ForegroundColor Cyan
         Push-Location $Desktop
-        try { & npm.cmd ci; if ($LASTEXITCODE -ne 0) { throw "npm ci failed." } }
+        try {
+            & npm.cmd ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed." }
+            if (Test-Path -LiteralPath $LockFile -PathType Leaf) {
+                (Get-FileHash -LiteralPath $LockFile -Algorithm SHA256).Hash | Set-Content -LiteralPath $LockStamp -NoNewline
+            }
+        }
         finally { Pop-Location }
     }
     $LocalBuild = Join-Path $Root "local-build.json"

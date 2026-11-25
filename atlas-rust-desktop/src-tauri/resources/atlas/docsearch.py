@@ -55,7 +55,7 @@ def _files(folder):
                 except OSError:
                     continue
                 if st.st_size <= MAX_FILE_BYTES:
-                    out.append((entry.path, st.st_mtime, st.st_size))
+                    out.append((entry.path, st.st_mtime_ns, st.st_size))
                 if len(out) >= MAX_FILES:
                     return out
     return out

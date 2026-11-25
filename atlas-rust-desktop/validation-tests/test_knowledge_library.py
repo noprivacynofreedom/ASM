@@ -107,4 +107,18 @@ class KnowledgeLibraryTests(unittest.TestCase):
         self.assertEqual(chunks_count, 0)
         self.assertEqual(mode, 'ready to index')
 
+    def test_stopwords_and_prior_slash_command_do_not_pull_unrelated_books(self):
+        import context_engine, knowledge_engine
+        q = context_engine.retrieval_query([
+            {'role': 'user', 'content': '/hyperswarm incorporate hex-strike-ai and mcp tools into existing code'},
+            {'role': 'assistant', 'content': 'Swarm stopped.'},
+            {'role': 'user', 'content': 'weather in iran?'},
+        ])
+        self.assertEqual(q, 'weather in iran?')
+        records = [
+            {'id': 'src:1:0', 'kind': 'source', 'title': 'MCP For Dummies', 'text': 'Build AI agents in Python using MCP servers and tools.'},
+        ]
+        hits = knowledge_engine.search(records, q, '127.0.0.1', 8080, None, limit=5)
+        self.assertEqual(hits, [])
+
 if __name__ == '__main__': unittest.main()

@@ -5,6 +5,7 @@ Run alone: py server.py   (app.py also imports it)
 """
 import http.client
 import json
+import datetime
 import os
 import re
 import hashlib
@@ -30,16 +31,31 @@ import atlas_observability as OPS
 import swarm_run
 import compute_peers
 import compute_page
+import models_page
+import model_discovery
 import vision_probe
 import context_engine
 import cloud_llm
 import ctx_sync
 import test_suite_mcp
+import ctf_conduit_api
+import optional_modules
+import compare_mode
+import docs_canvas
+import research_pipeline
+import model_cookbook
+import skills_registry
+import task_scheduler
+import external_packs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("ATLAS_DATA_DIR", HERE)
 os.makedirs(DATA_DIR, exist_ok=True)
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+import chat_timing
+from pathlib import Path as Path_
+chat_timing.configure(DATA_DIR)
+cloud_llm.configure_keys_path(os.path.join(DATA_DIR, ".atlas", "cloud_keys.json"))
 
 # Defaults used when settings.json is missing, unreadable, or leaves a key out.
 DEFAULTS = {
@@ -52,6 +68,8 @@ DEFAULTS = {
     "embedding_model": "fastembed:BAAI/bge-small-en-v1.5",
     "distillation_model": "mentor-dense",
     "workspace_dir": "",
+    "browser_enabled": True,
+    "browser_mode": "auto",
 }
 
 
@@ -78,6 +96,8 @@ if not os.path.isabs(DATA):
     DATA = os.path.join(DATA_DIR, DATA)
 UPSTREAM_HOST, UPSTREAM_PORT = SETTINGS["upstream_host"], SETTINGS["upstream_port"]
 PORT = SETTINGS["server_port"]
+# MCP servers inherit this, so Atlas Commander calls this server, not a port guessed from another settings.json.
+os.environ["ATLAS_SERVER_URL"] = f"http://127.0.0.1:{PORT}"  # always: an inherited value may name another server
 _lock = threading.Lock()
 
 # Bot workspace directories
@@ -163,6 +183,110 @@ def _load_state():
             ensured_bots=None,
         )
         return data
+
+
+def _persist_detached_reply(conversation_id, completion, model=""):
+    """The window went away while a reply was being made. Save the finished reply into the chat,
+    so it is there when the user comes back. Returns True when a message was added."""
+    try:
+        msg = ((completion or {}).get("choices") or [{}])[0].get("message") or {}
+        text = msg.get("content") if isinstance(msg.get("content"), str) else ""
+        if not text.strip() or not conversation_id:
+            return False
+        with _DETACHED_LOCK:
+            data = _load_state()
+            chats = data.get("chats") if isinstance(data, dict) else None
+            chat = next((c for c in (chats or []) if isinstance(c, dict) and str(c.get("id")) == conversation_id), None)
+            if not chat or not isinstance(chat.get("messages"), list):
+                return False
+            last = chat["messages"][-1] if chat["messages"] else {}
+            if isinstance(last, dict) and last.get("role") == "assistant" and last.get("content") == text:
+                return False
+            chat["messages"].append({"role": "assistant", "content": text, "model": str(model or "")[:100],
+                                     "at": int(time.time() * 1000), "detached": True})
+            _save_state(data)
+        return True
+    except Exception:
+        return False
+
+
+_DETACHED_LOCK = threading.Lock()
+_STOP_TOKENS = {}  # request_id -> CancelToken of a running tool-loop reply
+
+
+def _detach_finish(worker_thread, result_box, conversation_id, model, trace_id):
+    """Wait for a generation whose window closed, then save its reply. Gives up after 20 minutes."""
+    def run():
+        worker_thread.join(1200)
+        ok = result_box.get("ok")
+        if ok and _persist_detached_reply(conversation_id, ok[0], model):
+            OPS.record_local_event(conversation_id, "", "chat.request.detached_saved",
+                "Window closed during generation; the finished reply was saved into the chat",
+                {"request_id": trace_id}, "info", trace_id)
+    threading.Thread(target=run, daemon=True, name="atlas-detached-reply").start()
+
+
+_STOPPED_IDS = {}  # request_id -> True when the user pressed Stop on a plain (no tools) reply
+
+
+def _sse_text(raw):
+    """Join the content deltas of an OpenAI-style SSE byte string into one text."""
+    out = []
+    for line in raw.split(b"\n"):
+        if not line.startswith(b"data:") or b"[DONE]" in line:
+            continue
+        try:
+            d = json.loads(line[5:].strip())
+            piece = (d.get("choices") or [{}])[0].get("delta", {}).get("content")
+        except (ValueError, AttributeError, IndexError):
+            continue
+        if isinstance(piece, str):
+            out.append(piece)
+    return "".join(out)
+
+
+def _drain_and_save(conn, resp, conversation_id, request_id, model):
+    """Plain reply path: the window closed. Read the rest of the stream in the background and save it."""
+    def run():
+        buf = b""
+        try:
+            while len(buf) < 8_000_000:
+                if _STOPPED_IDS.pop(request_id, False):
+                    return
+                chunk = resp.read1(8192)
+                if not chunk:
+                    break
+                buf += chunk
+        except Exception:
+            return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        text = _sse_text(buf)
+        if text.strip() and not _STOPPED_IDS.pop(request_id, False):
+            _persist_detached_reply(conversation_id, {"choices": [{"message": {"content": text}}]}, model)
+    threading.Thread(target=run, daemon=True, name="atlas-detached-plain").start()
+
+
+_SSE_ANSWER = re.compile(rb'"(?:content|reasoning_content|reasoning)"\s*:\s*"[^"]|"tool_calls"|"atlas_error"|"error"')
+
+
+def _peek_for_answer(resp, limit=2_000_000):
+    """Read the stream until it shows real model output or ends. Returns (bytes_read, stream_ended)."""
+    buf = b""
+    while len(buf) < limit:
+        try:
+            chunk = resp.read1(8192)
+        except (OSError, http.client.HTTPException):
+            return buf, True
+        if not chunk:
+            return buf, True
+        buf += chunk
+        if _SSE_ANSWER.search(buf):
+            return buf, False
+    return buf, False
 
 
 def _load_state_raw():
@@ -392,8 +516,85 @@ def _enrich_swarm_runs(payload, summary_only=False, category="", state_filter=""
 # MCP health is measured by real child processes and MCP JSON-RPC responses.
 from mcp_monitor import MCPMonitor, build_mcp_specs
 import atexit, sys
+_SWARM_MODE_RE = re.compile(
+    # bare word, "mode=X", or a flag like "--abliterated" / "--local", then the goal
+    r"^(?:--mode[=:\s]+|mode[=:\s]+|--)?(local|hyper|hyperswarm|abliterated|uncensored)\b\s*(.*)$", re.I | re.S)
+
+
+def _parse_swarm_mode(raw, mode_override=None):
+    """(mode, goal, had_explicit_mode). An explicit mode in the text (e.g. '--abliterated') beats mode_override,
+    so '/hyperswarm --abliterated <goal>' runs abliterated, not hyper."""
+    m = _SWARM_MODE_RE.match(raw or "")
+    if m:
+        word = m.group(1).lower()
+        mode = "hyper" if word in ("hyper", "hyperswarm") else ("abliterated" if word in ("abliterated", "uncensored") else "local")
+        return mode, m.group(2).strip(), True
+    return mode_override, (raw or "").strip(), False
+
+
+BROWSER_MODES = ("auto", "sandbox", "host")
+def _browser_spec():
+    """Built-in 'browser' MCP server (browser_mcp.py beside this file). None when switched off,
+    when the file is missing, or when the user's own mcp_servers already has a 'browser' entry."""
+    if not SETTINGS.get("browser_enabled", True):
+        return None
+    script = os.path.join(HERE, "browser_mcp.py")
+    if not os.path.isfile(script):
+        return None
+    rows = SETTINGS.get("mcp_servers", [])
+    if any(isinstance(r, dict) and str(r.get("name") or "") == "browser" for r in (rows if isinstance(rows, list) else [])):
+        return None
+    mode = str(SETTINGS.get("browser_mode") or "auto")
+    if mode not in BROWSER_MODES:
+        mode = "auto"
+    return {"name": "browser", "enabled": True, "command": ["{python}", script], "cwd": "{project}",
+            "description": "Built-in browser tools (Playwright)", "env": {"ATLAS_BROWSER_MODE": mode}}
+def _github_spec():
+    """Built-in 'github' MCP server (github_mcp.py). Off by default: it needs a token and writes to GitHub.
+    None when off, when the file is missing, or when the user's own mcp_servers has a 'github' entry."""
+    if SETTINGS.get("github_enabled", False) is not True:
+        return None
+    script = os.path.join(HERE, "github_mcp.py")
+    if not os.path.isfile(script):
+        return None
+    rows = SETTINGS.get("mcp_servers", [])
+    if any(isinstance(r, dict) and str(r.get("name") or "") == "github" for r in (rows if isinstance(rows, list) else [])):
+        return None
+    return {"name": "github", "enabled": True, "command": ["{python}", script], "cwd": "{project}",
+            "description": "Built-in GitHub tools (repos, issues, PRs, files, branches)"}
+def _test_suite_spec():
+    """Built-in 'test_suite' MCP server (test_suite_mcp.py): lets bots read and tick the Test Suite / bug tiles.
+    On by default (it drives the in-app Kanban); off only if the user sets test_suite_enabled false or runs their own."""
+    if SETTINGS.get("test_suite_enabled", True) is False:
+        return None
+    script = os.path.join(HERE, "test_suite_mcp.py")
+    if not os.path.isfile(script):
+        return None
+    rows = SETTINGS.get("mcp_servers", [])
+    if any(isinstance(r, dict) and str(r.get("name") or "") == "test_suite" for r in (rows if isinstance(rows, list) else [])):
+        return None
+    return {"name": "test_suite", "enabled": True, "command": ["{python}", script], "cwd": "{project}",
+            "description": "Read and update the Test Suite / bug tiles (features, checklist ticks, status, run logs)"}
+def _swarm_workspace_spec():
+    """Built-in 'swarm_workspace' MCP server: discover swarm runs and read the files they saved.
+    On by default; off only if the user sets swarm_workspace_enabled false or runs their own."""
+    if SETTINGS.get("swarm_workspace_enabled", True) is False:
+        return None
+    script = os.path.join(HERE, "swarm_workspace_mcp.py")
+    if not os.path.isfile(script):
+        return None
+    rows = SETTINGS.get("mcp_servers", [])
+    if any(isinstance(r, dict) and str(r.get("name") or "") == "swarm_workspace" for r in (rows if isinstance(rows, list) else [])):
+        return None
+    return {"name": "swarm_workspace", "enabled": True, "command": ["{python}", script], "cwd": "{project}",
+            "description": "Discover swarm runs and read the files they saved (answers, code)"}
 def _mcp_specs():
-    return build_mcp_specs(SETTINGS.get("mcp_servers", []), HERE, sys.executable, workspace_root())
+    rows = SETTINGS.get("mcp_servers", [])
+    rows = list(rows) if isinstance(rows, list) else []
+    for built_in in (_browser_spec(), _github_spec(), _test_suite_spec(), _swarm_workspace_spec()):
+        if built_in:
+            rows.append(built_in)
+    return build_mcp_specs(rows, HERE, sys.executable, workspace_root())
 _MCP = MCPMonitor(_mcp_specs())
 _MCP_AUDIT = deque(maxlen=200)
 _MCP_AUDIT_LOCK = threading.Lock()
@@ -477,6 +678,20 @@ def _workspace_read(root, rel):
         raise ValueError("Binary files cannot be attached")
     return {"name": name, "text": raw.decode("utf-8", "replace")}
 
+def _swarm_files(run_id, rel=""):
+    """List (no rel) or read one file a swarm run saved under <workspace or data folder>/swarm-output/<run_id>/."""
+    run_id = str(run_id or "")
+    if not re.fullmatch(r"sw[0-9a-f]{4,32}", run_id):
+        raise ValueError("Invalid run_id: expected 'sw' and hex digits, e.g. sw12ab34cd")
+    # The run saved where the Workspace pointed at that time; look in the current Workspace, then the data folder.
+    folder = next((d for d in (os.path.join(b, "swarm-output", run_id) for b in (workspace_root(), DATA_DIR) if b)
+                   if os.path.isdir(d)), None)
+    if not rel:
+        return {"run_id": run_id, "folder": folder or "", "files": _workspace_listing(folder) if folder else []}
+    if not folder:
+        raise ValueError("This run has no saved files")
+    return {"run_id": run_id, **_workspace_read(folder, rel)}
+
 def _set_workspace(path_value):
     """Validate and persist workspace_dir, then restart MCP servers so they use it."""
     global _MCP
@@ -507,6 +722,49 @@ def _set_workspace(path_value):
     _MCP = MCPMonitor(_mcp_specs())
     old.stop_all()
     return value
+
+def _set_browser(payload):
+    """Validate and persist browser_enabled / browser_mode, then restart MCP servers."""
+    mode = str(payload.get("mode", SETTINGS.get("browser_mode", "auto")) or "auto")
+    if mode not in BROWSER_MODES:
+        raise ValueError("Browser mode must be auto, sandbox or host")
+    enabled = payload.get("enabled", SETTINGS.get("browser_enabled", True))
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be true or false")
+    _save_settings_and_restart_mcp({"browser_mode": mode, "browser_enabled": enabled})
+    return {"mode": mode, "enabled": enabled}
+
+def _set_github(payload):
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be true or false")
+    _save_settings_and_restart_mcp({"github_enabled": enabled})
+    return {"enabled": enabled}
+
+def _save_settings_and_restart_mcp(updates):
+    """Merge updates into settings.json (atomic replace), reload SETTINGS, restart the MCP servers."""
+    global _MCP
+    path = SETTINGS_PATH
+    current = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+            if isinstance(loaded, dict):
+                current = loaded
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Cannot safely update settings.json: {exc}")
+    current.update(updates)
+    tmp = path + ".mcp.tmp"
+    with _MCP_CONFIG_LOCK:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(current, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+        SETTINGS.clear(); SETTINGS.update(load_settings(path))
+        old = _MCP
+        _MCP = MCPMonitor(_mcp_specs())
+        old.stop_all()
 
 def _plugin_action(payload):
     rows=SETTINGS.get("mcp_servers",[])
@@ -1015,6 +1273,21 @@ def _bot_file_name_ok(name):
             and name == name.strip() and not name.endswith("."))
 
 
+def friendly_model_error(exc):
+    """Plain text for a failed model call. A refused connection means no llama-swap is listening."""
+    if isinstance(exc, ConnectionError):
+        return (f"The model server is not running: the connection to llama-swap on port {UPSTREAM_PORT} was refused "
+                "(llama-swap closed or crashed). Start it again, or restart Atlas, then send the message again. "
+                f"Detail: {type(exc).__name__}: {exc}")
+    return f"Atlas MCP tool loop failed: {type(exc).__name__}: {exc}"
+
+
+def current_date_line(now=None):
+    """One line with today's local date and time zone. No clock time: it would change the prompt every minute."""
+    now = (now or datetime.datetime.now().astimezone())
+    return f"Current date: {now.strftime('%A %d %B %Y')} (time zone {now.strftime('%Z') or 'local'}, UTC{now.strftime('%z')[:3]}:{now.strftime('%z')[3:]}). Use it for anything about today or recent events."
+
+
 def _append_system_text(messages, text):
     """Add text to the first system message (string OR list content), else insert one at the front."""
     first = messages[0] if messages and isinstance(messages[0], dict) else None
@@ -1054,7 +1327,7 @@ def _inject_context(request, messages, atlas_context=None):
         if text:
             added.append(text)
             info["memory_count"] = len(kept); info["memory_tokens"] = context_engine.estimate_tokens(text)
-    if query.strip() and flags.get("knowledge", True) is not False:
+    if query.strip() and flags.get("knowledge", False) is True:  # opt-in: never auto-RAG the library unless the bot asks for it
         try:
             hits, mode = _library_retrieve(query, max(8, int(SETTINGS.get("knowledge_context_results", 5)) * 2))
             window = _known_window(request.get("model")) or int(SETTINGS.get("default_context_window", 16384))
@@ -1073,6 +1346,20 @@ def _inject_context(request, messages, atlas_context=None):
         from mcp_chat import normalize_system_messages
         request["messages"] = normalize_system_messages(messages)
     return info
+
+
+def _last_sse_json(tail):
+    """The newest JSON object in the tail of an SSE stream that carries timings or usage ({} if none)."""
+    best = {}
+    for line in tail.decode("utf-8", "replace").splitlines():
+        if line.startswith("data:") and ("timings" in line or "usage" in line):
+            try:
+                obj = json.loads(line[5:].strip())
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                best = obj
+    return best
 
 
 def _prepare_upstream_chat(body, ctx_info, host, port):
@@ -1113,9 +1400,89 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_local_cors(self, code, body, ctype="application/json"):
+        data = body if isinstance(body, bytes) else body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        origin = self.headers.get("Origin")
+        if origin and self._local_ui_request():
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_OPTIONS(self):
+        if (self.path.startswith("/api/conduit/") or self.path.startswith("/api/swarm/")) and self._local_ui_request():
+            return self._send_local_cors(204, b"", "text/plain")
+        return self._send(403, json.dumps({"ok": False, "error": "CORS preflight not allowed"}))
+
+    def do_PUT(self):
+        if not self.path.startswith("/api/conduit/"):
+            return self._send(405, json.dumps({"ok": False, "error": "Method not allowed"}))
+        if self.headers.get("Origin") and not self._local_ui_request(post=True):
+            return self._send_local_cors(403, json.dumps({"ok": False, "error": "Writes only from Atlas Chat"}))
+        try:
+            if self.path == "/api/conduit/state":
+                payload = json.loads(self._body() or b"{}")
+                state = payload.get("state") if isinstance(payload, dict) else None
+                res = ctf_conduit_api.write_conduit_state(DATA_DIR, state)
+                return self._send_local_cors(200, json.dumps(res, ensure_ascii=False))
+            return self._send_local_cors(404, json.dumps({"ok": False, "error": "Not found"}))
+        except (ValueError, TypeError, BodyError) as exc:
+            return self._send_local_cors(400, json.dumps({"ok": False, "error": str(exc)}))
+
+    def _ctf_conduit_get(self):
+        path = urlparse(self.path).path
+        if path == "/api/swarm/rooms":
+            self._send_local_cors(200, json.dumps(ctf_conduit_api.list_swarm_rooms(), ensure_ascii=False))
+            return True
+        if path.startswith("/api/swarm/room/"):
+            room_id = path[len("/api/swarm/room/"):].split("/", 1)[0]
+            self._send_local_cors(200, json.dumps(ctf_conduit_api.get_swarm_room(room_id), ensure_ascii=False))
+            return True
+        if path == "/api/conduit/health":
+            self._send_local_cors(200, json.dumps(ctf_conduit_api.conduit_health(), ensure_ascii=False))
+            return True
+        if path == "/api/conduit/state":
+            self._send_local_cors(200, json.dumps(ctf_conduit_api.read_conduit_state(DATA_DIR), ensure_ascii=False))
+            return True
+        if path == "/api/conduit/devlog":
+            self._send_local_cors(200, json.dumps(ctf_conduit_api.read_devlog(DATA_DIR), ensure_ascii=False))
+            return True
+        return False
+
+    def _ctf_conduit_post(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/swarm/room/") and path.endswith("/event"):
+            room_id = path[len("/api/swarm/room/"):-len("/event")].strip("/")
+            try:
+                payload = json.loads(self._body() or b"{}")
+                res = ctf_conduit_api.handle_swarm_event(room_id, payload)
+                self._send_local_cors(200, json.dumps(res, ensure_ascii=False))
+            except (ValueError, TypeError) as exc:
+                self._send_local_cors(400, json.dumps({"ok": False, "error": str(exc)}))
+            return True
+        if path == "/api/conduit/state/reset":
+            res = ctf_conduit_api.reset_conduit_state(DATA_DIR)
+            self._send_local_cors(200, json.dumps(res, ensure_ascii=False))
+            return True
+        if path == "/api/conduit/devlog":
+            try:
+                payload = json.loads(self._body() or b"{}")
+                res = ctf_conduit_api.append_devlog(DATA_DIR, payload if isinstance(payload, dict) else {})
+                self._send_local_cors(200, json.dumps(res, ensure_ascii=False))
+            except (ValueError, TypeError) as exc:
+                self._send_local_cors(400, json.dumps({"ok": False, "error": str(exc)}))
+            return True
+        return False
 
     def _body(self):
         raw = self.headers.get("Content-Length")
@@ -1155,16 +1522,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             return self._send_swarm_text("swarm-help", help_text)
 
-        mode = mode_override
-        mode_match = re.match(r"^(?:--mode[=:\s]+|mode[=:\s]+)?(local|hyper|hyperswarm|abliterated|uncensored)\b\s*(.*)$", raw, re.I)
-        if mode_match:
-            m = mode_match.group(1).lower()
-            mode = "hyper" if m in ("hyper", "hyperswarm") else ("abliterated" if m in ("abliterated", "uncensored") else "local")
-            goal = mode_match.group(2).strip()
-        else:
-            goal = raw
-            if not mode:
-                mode = "hyper" if (swarm_run.pipeline_wanted("hyper") or cloud_llm.any_free_available()) else "local"
+        mode, goal, had_explicit = _parse_swarm_mode(raw, mode_override)
+        if not had_explicit and not mode:
+            mode = "hyper" if (swarm_run.pipeline_wanted("hyper") or cloud_llm.any_free_available()) else "local"
 
         if not goal:
             return self._send_swarm_text("swarm-help", f"Please specify a goal for {mode} mode: `/swarm {mode} <goal>`")
@@ -1282,7 +1642,8 @@ class Handler(BaseHTTPRequestHandler):
         # With no workspace chosen, the commander falls back to the project root, so tell the model that path.
         tool_root = ws_root or os.environ.get("ATLAS_PROJECT_ROOT") or HERE
         workspace_note = f"Working directory: {tool_root}\nFile tools operate inside this folder; use paths relative to it (full paths inside it also work)."
-        injected_prompt = "\n\n".join(part for part in (default_prompt, cycle_prompt, feedback_context, workspace_note) if part)
+        # Last, and only the DAY: the text before it stays identical all day, so the llama.cpp prompt cache keeps working.
+        injected_prompt = "\n\n".join(part for part in (default_prompt, cycle_prompt, feedback_context, workspace_note, current_date_line()) if part)
         if not injected_prompt:
             return body
 
@@ -1334,8 +1695,9 @@ class Handler(BaseHTTPRequestHandler):
         return json.dumps(req).encode(), sources
 
     def _proxy_mcp_tools(self, body, sources, atlas_context=None):
-        """Run live MCP tools through the bounded model tool loop, then return SSE."""
-        from mcp_chat import run_tool_loop, as_sse, NoLiveTools
+        """Run live MCP tools through the bounded model tool loop, streaming keepalives + live tool events."""
+        from mcp_chat import run_tool_loop, as_sse, as_sse_trailer, has_live_tools, NoLiveTools, CancelToken
+        import queue as _queue
         try:
             request = json.loads(body)
             if not isinstance(request, dict) or not isinstance(request.get("messages"), list):
@@ -1346,35 +1708,22 @@ class Handler(BaseHTTPRequestHandler):
             trace_id = str(context.get('request_id') or '')[:128] or None
             def record(event):
                 return _MCP_AUDIT_RECORDER.record(event, context)
+            monitor = book_tools.LibraryTools(_MCP, _library_books, _library_load_book)
+            if not has_live_tools(monitor, request):
+                raise NoLiveTools("No live MCP tools are available")
             peer_host, peer_port, peer = compute_peers.route(request.get("model"))
             machine = peer["name"] if peer else "This PC"
-            completion, _events = run_tool_loop(
-                request, book_tools.LibraryTools(_MCP, _library_books, _library_load_book), record,
-                peer_host or UPSTREAM_HOST, peer_port or UPSTREAM_PORT, max_rounds=5
-            )
-            if conversation_id:
-                OPS.record_local_event(conversation_id, bot_id, 'chat.request.completed',
-                    'Chat generation completed through MCP tool loop',
-                    {'request_id': trace_id, 'queue_job_id': context.get('queue_job_id'), 'model': str(request.get('model') or '')[:100]},
-                    'info', trace_id)
-            if request.get("stream", True):
-                payload = as_sse(completion).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("X-Accel-Buffering", "no")
-                self.send_header("X-Atlas-Machine", machine)
-                if sources:
-                    self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(x) for x in sources]))
-                ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
-                usage = completion.get("usage") if isinstance(completion, dict) else None
-                if isinstance(usage, dict) and usage.get("prompt_tokens"):
-                    ctx_info["prompt_tokens_exact"] = int(usage["prompt_tokens"])
-                self.send_header("X-Atlas-Context", json.dumps(ctx_info))
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-            else:
+
+            if not request.get("stream", True):
+                completion, events = run_tool_loop(
+                    request, monitor, record,
+                    peer_host or UPSTREAM_HOST, peer_port or UPSTREAM_PORT, max_rounds=5
+                )
+                if conversation_id:
+                    OPS.record_local_event(conversation_id, bot_id, 'chat.request.completed',
+                        'Chat generation completed through MCP tool loop',
+                        {'request_id': trace_id, 'queue_job_id': context.get('queue_job_id'), 'model': str(request.get('model') or '')[:100]},
+                        'info', trace_id)
                 payload = json.dumps(completion, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -1382,10 +1731,117 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                return
+
+            # Streaming SSE: send headers immediately and emit keepalives + live tool events
+            # so slow local model loads or multi-round tool calls never trigger idle timeouts.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("X-Atlas-Machine", machine)
+            if sources:
+                self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(x) for x in sources]))
+            ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
+            self.send_header("X-Atlas-Context", json.dumps(ctx_info))
+            self.end_headers()
+
+            updates = _queue.Queue()
+            cancel = CancelToken()
+            if trace_id:
+                _STOP_TOKENS[trace_id] = cancel
+                if len(_STOP_TOKENS) > 200:
+                    _STOP_TOKENS.pop(next(iter(_STOP_TOKENS)), None)
+            result_box = {}
+            streamed_any = False
+
+            def on_tool_update(summary_list):
+                updates.put(("tools", summary_list))
+
+            def on_content_delta(piece):
+                updates.put(("delta", piece))
+
+            def worker():
+                try:
+                    result_box["ok"] = run_tool_loop(
+                        request, monitor, record,
+                        peer_host or UPSTREAM_HOST, peer_port or UPSTREAM_PORT,
+                        max_rounds=5, on_event=on_tool_update, on_delta=on_content_delta,
+                        cancel=cancel, trace_id=trace_id,
+                    )
+                except Exception as exc:
+                    result_box["err"] = exc
+                finally:
+                    updates.put(("done", None))
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+
+            while True:
+                try:
+                    kind, data = updates.get(timeout=3.0)
+                except _queue.Empty:
+                    try:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                        raise  # window closed: the outer handler lets the reply finish and saves it
+                    continue
+                if kind == "tools":
+                    chunk = "data: " + json.dumps({"atlas_tool_events": data}, ensure_ascii=False) + "\n\n"
+                    self.wfile.write(chunk.encode("utf-8"))
+                    self.wfile.flush()
+                elif kind == "delta":
+                    # Live model tokens: forward as real content so the UI leaves "Loading model"
+                    # on the first token instead of waiting for the whole generation.
+                    chunk = "data: " + json.dumps({"choices": [{"index": 0, "delta": {"content": data}}]}, ensure_ascii=False) + "\n\n"
+                    self.wfile.write(chunk.encode("utf-8"))
+                    self.wfile.flush()
+                    streamed_any = True
+                elif kind == "done":
+                    break
+
+            if "err" in result_box:
+                exc = result_box["err"]
+                if conversation_id:
+                    OPS.record_local_event(conversation_id, bot_id, 'chat.request.failed',
+                        'Chat generation failed in MCP tool loop',
+                        {'request_id': trace_id, 'error': f'{type(exc).__name__}: {exc}'},
+                        'error', trace_id)
+                err_chunk = "data: " + json.dumps(
+                    {"atlas_error": friendly_model_error(exc)},
+                    ensure_ascii=False,
+                ) + "\n\ndata: [DONE]\n\n"
+                self.wfile.write(err_chunk.encode("utf-8"))
+                self.wfile.flush()
+                return
+
+            completion, events = result_box["ok"]
+            if conversation_id:
+                OPS.record_local_event(conversation_id, bot_id, 'chat.request.completed',
+                    'Chat generation completed through MCP tool loop',
+                    {'request_id': trace_id, 'queue_job_id': context.get('queue_job_id'), 'model': str(request.get('model') or '')[:100]},
+                    'info', trace_id)
+            # If tokens already streamed live, send only the usage/tool-event trailer so the
+            # answer is not duplicated; otherwise (e.g. the stream fell back to non-streaming)
+            # send the full answer as one chunk.
+            payload = (as_sse_trailer(completion, events) if streamed_any else as_sse(completion, events)).encode("utf-8")
+            self.wfile.write(payload)
+            self.wfile.flush()
         except NoLiveTools:
             return False  # the caller answers with plain chat instead of failing the request
-        except (BrokenPipeError, ConnectionResetError):
-            return  # the client went away; there is nobody to answer
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # The window went away (chat closed, page reloaded, app hidden). Do NOT cancel the model:
+            # let it finish and save the reply into the chat, so the user finds it on return.
+            # Only the Stop button cancels (the browser then aborts before this point is reached on purpose).
+            wt, box = locals().get("t"), locals().get("result_box")
+            conversation_id = locals().get("conversation_id")
+            trace_id = locals().get("trace_id")
+            if conversation_id and wt is not None and box is not None:
+                _detach_finish(wt, box, conversation_id, request.get("model"), trace_id)
+            elif locals().get("cancel") is not None:
+                cancel.set()  # no chat to save into: free the model slot
+            return
         except Exception as exc:
             context = atlas_context if isinstance(atlas_context, dict) else {}
             conversation_id = str(context.get('conversation_id') or '')[:128]
@@ -1396,11 +1852,10 @@ class Handler(BaseHTTPRequestHandler):
                     'Chat generation failed in MCP tool loop',
                     {'request_id': trace_id, 'error': f'{type(exc).__name__}: {exc}'},
                     'error', trace_id)
-            # A bad request is the caller's fault (400); an upstream/tool failure is a bad gateway (502).
             code = 400 if isinstance(exc, ValueError) else 502
             try:
-                return self._send(code, json.dumps({"error": {"message": f"Atlas MCP tool loop failed: {type(exc).__name__}: {exc}"}}))
-            except (BrokenPipeError, ConnectionResetError):
+                return self._send(code, json.dumps({"error": {"message": friendly_model_error(exc)}}))
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 return
 
     def _proxy_cloud_chat(self, request, sources, atlas_context=None):
@@ -1421,7 +1876,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = as_sse(completion).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Accel-Buffering", "no")
                 self.send_header("X-Atlas-Machine", machine)
                 if sources:
@@ -1526,11 +1981,32 @@ class Handler(BaseHTTPRequestHandler):
         ctx_info = dict(getattr(self, "_atlas_ctx", None) or {})
         if body and method == "POST" and self.path.startswith("/v1/chat/completions"):
             body, ctx_info = _prepare_upstream_chat(body, ctx_info, target_host, target_port)
+        t_start = time.time()
+        t_first, tail, t_model, t_loaded, t_parts = None, b"", None, None, None
+        if body and method == "POST" and self.path.startswith("/v1/chat/completions"):
+            try:
+                t_req = json.loads(body)
+                t_model = t_req.get("model")
+                t_parts = chat_timing.breakdown(t_req)
+                import mcp_chat
+                t_loaded = mcp_chat._is_loaded(target_host, target_port, t_model)
+            except Exception:
+                pass
+            t_start = time.time()
         try:
             conn = http.client.HTTPConnection(target_host, target_port, timeout=900)
             conn.request(method, self.path, body=body,
                          headers=compute_peers.headers_for(target_host, target_port, {"Content-Type": self.headers.get("Content-Type", "application/json")}))
             resp = conn.getresponse()
+            if resp.status in (502, 503, 504) and body and self.path.startswith("/v1/chat/completions"):
+                # llama-swap could not start the model (dead or orphan llama-server). Clear it and retry once.
+                import mcp_chat
+                if mcp_chat.recover_model_server(target_host, target_port, f"{resp.status} upstream"):
+                    conn.close()
+                    conn = http.client.HTTPConnection(target_host, target_port, timeout=900)
+                    conn.request(method, self.path, body=body,
+                                 headers=compute_peers.headers_for(target_host, target_port, {"Content-Type": self.headers.get("Content-Type", "application/json")}))
+                    resp = conn.getresponse()
         except (OSError, http.client.HTTPException) as e:
             if conversation_id:
                 OPS.record_local_event(conversation_id, bot_id, 'chat.request.failed',
@@ -1540,26 +2016,73 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(502, json.dumps({"error": f"{machine} is offline or not answering ({e}). Start llama-swap on {machine}, or pick a model on this PC."}))
             return self._send(502, json.dumps({"error": f"llama-swap not reachable on {UPSTREAM_PORT}: {e}"}))
         stream_disconnected = False
+        held = b""
+        if (resp.status < 400 and body and self.path.startswith("/v1/chat/completions")
+                and "text/event-stream" in (resp.getheader("Content-Type") or "")):
+            # Hold the first bytes until the model produced something. A stream that ends with no text, no
+            # thinking and no tool call is a failed model start: clear dead model processes and ask once more.
+            for attempt in (1, 2):
+                held, ended = _peek_for_answer(resp)
+                if _SSE_ANSWER.search(held) or not ended:
+                    break
+                if attempt == 2:
+                    held = (b'data: {"atlas_error": "The model returned no answer, even after Atlas restarted it. '
+                            b'Check logs\\llama-swap.log in the Atlas data folder."}\n\ndata: [DONE]\n\n')
+                    break
+                import mcp_chat
+                conn.close()
+                if not mcp_chat.recover_model_server(target_host, target_port, "closed the stream"):
+                    held = (b'data: {"atlas_error": "The model returned no answer. Atlas could not restart it '
+                            b'right now. Send the message again."}\n\ndata: [DONE]\n\n')
+                    break
+                try:
+                    conn = http.client.HTTPConnection(target_host, target_port, timeout=900)
+                    conn.request(method, self.path, body=body,
+                                 headers=compute_peers.headers_for(target_host, target_port, {"Content-Type": self.headers.get("Content-Type", "application/json")}))
+                    resp = conn.getresponse()
+                except (OSError, http.client.HTTPException) as e:
+                    held = ('data: {"atlas_error": "llama-swap not reachable: %s"}\n\ndata: [DONE]\n\n' % str(e)[:120].replace('"', "'")).encode()
+                    break
         self.send_response(resp.status)
         self.send_header("X-Atlas-Machine", machine)
         self.send_header("Content-Type", resp.getheader("Content-Type", "application/json"))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store")
         if sources:  # file names the UI shows under the answer
             self.send_header("X-Atlas-Sources", json.dumps([os.path.basename(s) for s in sources]))
         if ctx_info:
             self.send_header("X-Atlas-Context", json.dumps(ctx_info))
         self.end_headers()
         try:
+            if held:
+                if t_model is not None and b'"content"' in held:
+                    t_first = time.time()
+                tail = (tail + held)[-6000:]
+                self.wfile.write(held)
+                self.wfile.flush()
             while True:
                 chunk = resp.read1(8192)
                 if not chunk:
                     break
+                if t_model is not None:
+                    if t_first is None and b'"content"' in chunk:
+                        t_first = time.time()
+                    tail = (tail + chunk)[-6000:]
                 self.wfile.write(chunk)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             stream_disconnected = True
+            # Window closed mid-reply: keep reading so the model finishes, then save the reply into the chat.
+            # (A real Stop is sent to /api/chat/stop first and sets the token below.)
+            if conversation_id and request_id and resp.status < 400:
+                _drain_and_save(conn, resp, conversation_id, request_id, t_model)
+                conn = None
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
+            if t_model is not None:
+                chat_timing.write(chat_timing.entry(request_id, t_model, t_start, t_first, time.time(),
+                                                    _last_sse_json(tail), t_loaded,
+                                                    "disconnected" if stream_disconnected else None, t_parts))
             if conversation_id:
                 failed = resp.status >= 400
                 kind = 'chat.request.disconnected' if stream_disconnected else ('chat.request.failed' if failed else 'chat.request.completed')
@@ -1569,8 +2092,55 @@ class Handler(BaseHTTPRequestHandler):
                     {'request_id': request_id, 'queue_job_id': atlas_context.get('queue_job_id'), 'http_status': resp.status}, level, request_id)
 
     def do_GET(self):
+        if self._ctf_conduit_get():
+            return
+        if self.path == "/api/modules":
+            return self._send(200, json.dumps(optional_modules.catalog_response(SETTINGS), ensure_ascii=False))
+        if self.path.startswith("/api/compare/history"):
+            if not optional_modules.is_enabled(SETTINGS, "compare"):
+                return self._send(403, json.dumps({"ok": False, "error": "Blind Compare module is disabled. Enable it in /modules."}))
+            hist_path = os.path.join(DATA_DIR, ".atlas", "compare_history.jsonl")
+            return self._send(200, json.dumps({
+                "ok": True,
+                "history": compare_mode.list_history(hist_path, limit=30),
+                "leaderboard": compare_mode.leaderboard(hist_path),
+            }, ensure_ascii=False))
+        if self.path == "/api/docs" or self.path.startswith("/api/docs/"):
+            if not optional_modules.is_enabled(SETTINGS, "docs_canvas"):
+                return self._send(403, json.dumps({"ok": False, "error": "Docs Canvas module is disabled. Enable it in /modules."}))
+            if self.path == "/api/docs":
+                return self._send(200, json.dumps({"ok": True, "docs": docs_canvas.list_docs(DATA_DIR)}, ensure_ascii=False))
+            doc_id = self.path[len("/api/docs/"):].split("?", 1)[0]
+            try:
+                return self._send(200, json.dumps({"ok": True, "doc": docs_canvas.get_doc(DATA_DIR, doc_id)}, ensure_ascii=False))
+            except FileNotFoundError as exc:
+                return self._send(404, json.dumps({"ok": False, "error": str(exc)}))
+            except ValueError as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path.startswith("/api/research/reports"):
+            if not optional_modules.is_enabled(SETTINGS, "deep_research"):
+                return self._send(403, json.dumps({"ok": False, "error": "Deep Research module is disabled. Enable it in /modules."}))
+            return self._send(200, json.dumps({"ok": True, "reports": research_pipeline.list_reports(DATA_DIR)}, ensure_ascii=False))
+        if self.path == "/api/cookbook":
+            if not optional_modules.is_enabled(SETTINGS, "cookbook"):
+                return self._send(403, json.dumps({"ok": False, "error": "Model Cookbook module is disabled. Enable it in /modules."}))
+            return self._send(200, json.dumps(model_cookbook.recommendations(HERE, DATA_DIR), ensure_ascii=False))
+        if self.path == "/api/skills-registry":
+            if not optional_modules.is_enabled(SETTINGS, "skills_registry"):
+                return self._send(403, json.dumps({"ok": False, "error": "Governed Skills Registry module is disabled. Enable it in /modules."}))
+            return self._send(200, json.dumps({"ok": True, "skills": skills_registry.list_skills(DATA_DIR)}, ensure_ascii=False))
+        if self.path == "/api/scheduler":
+            if not optional_modules.is_enabled(SETTINGS, "scheduler"):
+                return self._send(403, json.dumps({"ok": False, "error": "Scheduled Agent Tasks module is disabled. Enable it in /modules."}))
+            return self._send(200, json.dumps({"ok": True, **task_scheduler.status_view(DATA_DIR)}, ensure_ascii=False))
+        if self.path == "/api/packs/status":
+            return self._send(200, json.dumps({"ok": True, "flags": optional_modules.resolve_modules(SETTINGS), **external_packs.packs_overview(DATA_DIR, SETTINGS)}, ensure_ascii=False))
         if self.path == "/api/cloud/models":
             return self._send(200, json.dumps({"ok": True, "enabled": cloud_llm.enabled(), "models": cloud_llm.picker_models()}, ensure_ascii=False))
+        if self.path == "/api/cloud/keys":
+            if not self._local_ui_request():
+                return self._send(403, json.dumps({"ok": False, "error": "Cloud keys only from this PC"}))
+            return self._send(200, json.dumps({"ok": True, **cloud_llm.keys_view()}, ensure_ascii=False))
         if self.path.startswith("/api/context/window"):
             model = (parse_qs(urlparse(self.path).query).get("model") or [""])[0]
             if not model:
@@ -1611,7 +2181,7 @@ class Handler(BaseHTTPRequestHandler):
             deadline = time.time() + 20
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
@@ -1655,6 +2225,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(result, ensure_ascii=False))
             except ValueError as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path == "/models":
+            return self._send(200, models_page.PAGE, "text/html; charset=utf-8")
+        if self.path == "/api/chat-timing":
+            return self._send(200, json.dumps({"ok": True, "rows": chat_timing.recent(25)}))
+        if self.path == "/api/models/local":
+            return self._send(200, json.dumps(self._models_state()))
         if self.path == "/compute":
             return self._send(200, compute_page.PAGE, "text/html; charset=utf-8")
         if self.path == "/api/compute/peers":
@@ -1688,6 +2264,13 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(urlparse(self.path).query)
             conv = (q.get("conversation_id") or [""])[0][:128]
             return self._send(200, json.dumps({"now": time.time(), "live": swarm_run.live_get(conv, (q.get("stage") or [""])[0][:32])}, ensure_ascii=False))
+        swarm_files = re.fullmatch(r"/api/ops/swarm/runs/([^/]+)/files", urlparse(self.path).path)
+        if swarm_files:
+            try:
+                rel = (parse_qs(urlparse(self.path).query).get("path") or [""])[0]
+                return self._send(200, json.dumps({"ok": True, **_swarm_files(swarm_files.group(1), rel)}, ensure_ascii=False))
+            except (ValueError, OSError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if urlparse(self.path).path == "/api/ops/swarm/runs":
             # Backend truth for the swarm state bar, the activity line and the llama-swap Bot Logs page.
             q = parse_qs(urlparse(self.path).query)
@@ -1776,6 +2359,13 @@ class Handler(BaseHTTPRequestHandler):
             root = workspace_root()
             files = _workspace_listing(root) if root else []
             return self._send(200, json.dumps({"ok": True, "dir": root, "configured": bool(root), "setting": str(SETTINGS.get("workspace_dir") or ""), "files": files}, ensure_ascii=False))
+        if self.path.split("?")[0] == "/api/browser":
+            return self._send(200, json.dumps({"ok": True, "enabled": bool(SETTINGS.get("browser_enabled", True)),
+                "mode": SETTINGS.get("browser_mode", "auto"), "modes": list(BROWSER_MODES),
+                "available": os.path.isfile(os.path.join(HERE, "browser_mcp.py"))}))
+        if self.path.split("?")[0] == "/api/github":
+            return self._send(200, json.dumps({"ok": True, "enabled": SETTINGS.get("github_enabled", False) is True,
+                "available": os.path.isfile(os.path.join(HERE, "github_mcp.py"))}))
         if self.path.split("?")[0] == "/api/workspace/file":
             root = workspace_root()
             if not root:
@@ -1989,7 +2579,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _compute_post(self):
         """POST /api/compute/peers[/test|/remove]. Returns True when handled."""
-        if self.path not in ("/api/compute/peers", "/api/compute/peers/test", "/api/compute/peers/remove"):
+        if self.path not in ("/api/compute/peers", "/api/compute/peers/test", "/api/compute/peers/remove",
+                             "/api/compute/swarm-model-routes"):
             return False
         try:
             payload = json.loads(self._body() or b"{}")
@@ -1999,6 +2590,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = compute_peers.test_url(payload.get("url"), str(payload.get("name") or "Laptop"), payload.get("api_key", ""))
             elif self.path.endswith("/remove"):
                 result = compute_peers.remove_peer(str(payload.get("name") or ""))
+            elif self.path.endswith("/swarm-model-routes"):
+                result = compute_peers.save_swarm_model_routes(payload.get("routes"))
             else:
                 result = compute_peers.save_peer(payload.get("name"), payload.get("url"), payload.get("models"), payload.get("api_key"))
             self._send(200, json.dumps(result, ensure_ascii=False))
@@ -2106,6 +2699,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"ok": True, **test_suite_mcp.delete_feature(
                     DATA_DIR, feature_id=payload.get("feature_id") or payload.get("id") or ""
                 )}
+            elif action == "seed_defaults":
+                result = {"ok": True, **test_suite_mcp.seed_default_features(DATA_DIR)}
             elif action == "log_run":
                 run = test_suite_mcp.log_run(
                     DATA_DIR,
@@ -2117,13 +2712,324 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 result = {"ok": True, "run": run}
             else:
-                raise ValueError("action must be one of: add, update, delete, log_run")
+                raise ValueError("action must be one of: add, update, delete, log_run, seed_defaults")
             self._send(200, json.dumps(result, ensure_ascii=False))
         except (ValueError, TypeError) as exc:
             self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         return True
 
+    def _modules_post(self):
+        """POST /api/modules: toggle optional Atlas modules in settings.json."""
+        if self.path != "/api/modules":
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Module changes only from this PC"}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            updates = payload.get("modules") if isinstance(payload.get("modules"), dict) else payload
+            optional_modules.update_modules(SETTINGS_PATH, updates, lock=_MCP_CONFIG_LOCK)
+            SETTINGS.clear()
+            SETTINGS.update(load_settings(SETTINGS_PATH))
+            self._send(200, json.dumps(optional_modules.catalog_response(SETTINGS), ensure_ascii=False))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _compare_post(self):
+        """POST /api/compare/run|vote|reveal: blind side-by-side model comparison."""
+        if self.path not in ("/api/compare/run", "/api/compare/vote", "/api/compare/reveal"):
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Compare actions only from this PC"}))
+            return True
+        if not optional_modules.is_enabled(SETTINGS, "compare"):
+            self._send(403, json.dumps({"ok": False, "error": "Blind Compare module is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            if self.path.endswith("/run"):
+                result = compare_mode.run_compare(
+                    prompt=str(payload.get("prompt") or ""),
+                    models=payload.get("models") or [],
+                    system=str(payload.get("system") or ""),
+                    temperature=float(payload.get("temperature", 0.7)),
+                    max_tokens=int(payload.get("max_tokens", 1024)),
+                    timeout=int(payload.get("timeout", 120)),
+                )
+            elif self.path.endswith("/vote"):
+                hist_path = os.path.join(DATA_DIR, ".atlas", "compare_history.jsonl")
+                result = compare_mode.vote_compare(
+                    compare_id=str(payload.get("compare_id") or ""),
+                    winner_slot=str(payload.get("winner_slot") or ""),
+                    history_path=hist_path,
+                )
+            else:
+                result = compare_mode.reveal_compare(compare_id=str(payload.get("compare_id") or ""))
+            self._send(200, json.dumps(result, ensure_ascii=False))
+        except KeyError as exc:
+            self._send(404, json.dumps({"ok": False, "error": str(exc)}))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _docs_post(self):
+        """POST /api/docs/{save,delete,propose}: Writing-first Docs Canvas."""
+        if self.path not in ("/api/docs/save", "/api/docs/delete", "/api/docs/propose"):
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Docs Canvas actions only from this PC"}))
+            return True
+        if not optional_modules.is_enabled(SETTINGS, "docs_canvas"):
+            self._send(403, json.dumps({"ok": False, "error": "Docs Canvas module is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            if self.path.endswith("/save"):
+                doc = docs_canvas.save_doc(
+                    DATA_DIR,
+                    title=str(payload.get("title") or ""),
+                    content=str(payload.get("content") or ""),
+                    kind=str(payload.get("kind") or "md"),
+                    doc_id=payload.get("doc_id") or payload.get("id") or None,
+                )
+                result = {"ok": True, "doc": doc}
+            elif self.path.endswith("/delete"):
+                result = docs_canvas.delete_doc(DATA_DIR, str(payload.get("doc_id") or payload.get("id") or ""))
+            else:
+                result = docs_canvas.propose_edit(
+                    DATA_DIR,
+                    doc_id=str(payload.get("doc_id") or payload.get("id") or ""),
+                    instruction=str(payload.get("instruction") or ""),
+                    model=str(payload.get("model") or "assist"),
+                )
+            self._send(200, json.dumps(result, ensure_ascii=False))
+        except FileNotFoundError as exc:
+            self._send(404, json.dumps({"ok": False, "error": str(exc)}))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _scheduler_post(self):
+        """POST /api/scheduler/task|run|pause. Local text tasks only; no tools, no shell."""
+        if self.path not in ("/api/scheduler/task", "/api/scheduler/run", "/api/scheduler/pause"):
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Scheduler writes only from this PC"}))
+            return True
+        if not optional_modules.is_enabled(SETTINGS, "scheduler"):
+            self._send(403, json.dumps({"ok": False, "error": "Scheduled Agent Tasks module is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            if self.path.endswith("/pause"):
+                res = task_scheduler.set_paused(DATA_DIR, bool(payload.get("paused", True)))
+            elif self.path.endswith("/run"):
+                res = {"entry": task_scheduler.run_task_now(DATA_DIR, str(payload.get("id") or ""))}
+            else:
+                res = task_scheduler.upsert_task(DATA_DIR, payload)
+            self._send(200, json.dumps({"ok": True, **res, "status": task_scheduler.status_view(DATA_DIR)}, ensure_ascii=False))
+        except KeyError as exc:
+            self._send(404, json.dumps({"ok": False, "error": str(exc).strip("'")}))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _packs_post(self):
+        """POST /api/packs/productivity|media. Companion access is not ported."""
+        if self.path not in ("/api/packs/productivity", "/api/packs/media"):
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "External pack actions only from this PC"}))
+            return True
+        mod_id = "productivity_mcp" if self.path.endswith("/productivity") else "media_drawer"
+        if not optional_modules.is_enabled(SETTINGS, mod_id):
+            self._send(403, json.dumps({"ok": False, "error": "This pack is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            action = str(payload.get("action") or "").strip().lower()
+            extra: dict = {}
+            name = "atlas-productivity" if mod_id == "productivity_mcp" else "atlas-media-drawer"
+            if action in ("register_mcp", "unregister_mcp"):
+                SETTINGS["mcp_servers"] = external_packs.set_mcp_registration(SETTINGS_PATH, name, action == "register_mcp")
+            elif mod_id == "productivity_mcp":
+                from src import mcp_productivity as mp
+                if action == "tasks_add":
+                    extra["task"] = mp.tasks_add(payload.get("title", ""), due=payload.get("due", ""), priority=payload.get("priority", "normal"), data_dir=DATA_DIR)
+                elif action == "tasks_toggle":
+                    extra["task"] = mp.tasks_toggle(payload.get("id", ""), payload.get("done"), data_dir=DATA_DIR)
+                elif action == "calendar_add":
+                    extra["event"] = mp.calendar_add(payload.get("title", ""), payload.get("start", ""), notes=payload.get("notes", ""), data_dir=DATA_DIR)
+                elif action == "email_triage":
+                    extra["triage"] = mp.email_triage_readonly(limit=int(payload.get("limit") or 10))
+                else:
+                    raise ValueError("Unknown productivity pack action")
+            else:
+                from src import mcp_media_drawer as md
+                if action == "save_endpoint":
+                    extra["endpoint"] = external_packs.save_media_endpoint(DATA_DIR, str(payload.get("endpoint") or ""))
+                elif action == "probe":
+                    extra["probe"] = md.probe_endpoint(str(payload.get("endpoint") or external_packs.get_media_endpoint(DATA_DIR)))
+                elif action == "generate":
+                    extra["item"] = md.generate_media(
+                        str(payload.get("prompt") or ""),
+                        negative_prompt=str(payload.get("negative_prompt") or ""),
+                        width=int(payload.get("width") or 768),
+                        height=int(payload.get("height") or 768),
+                        endpoint=str(payload.get("endpoint") or external_packs.get_media_endpoint(DATA_DIR)),
+                        data_dir=DATA_DIR,
+                    )
+                else:
+                    raise ValueError("Unknown media drawer action")
+            self._send(200, json.dumps({"ok": True, **extra, "overview": external_packs.packs_overview(DATA_DIR, SETTINGS)}, ensure_ascii=False))
+        except KeyError as exc:
+            self._send(404, json.dumps({"ok": False, "error": str(exc).strip("'")}))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        except RuntimeError as exc:
+            self._send(502, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _research_post(self):
+        """POST /api/research/run: Swarm-backed Deep Research."""
+        if self.path != "/api/research/run":
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Research actions only from this PC"}))
+            return True
+        if not optional_modules.is_enabled(SETTINGS, "deep_research"):
+            self._send(403, json.dumps({"ok": False, "error": "Deep Research module is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            result = research_pipeline.run_research(
+                query=str(payload.get("query") or ""),
+                mode=str(payload.get("mode") or "hyper"),
+                max_sources=int(payload.get("max_sources", 6)),
+                model=str(payload.get("model") or ""),
+                data_dir=DATA_DIR,
+            )
+            if payload.get("save_to_docs") and optional_modules.is_enabled(SETTINGS, "docs_canvas"):
+                doc = docs_canvas.save_doc(
+                    DATA_DIR,
+                    title=f"Research: {result['query'][:60]}",
+                    content=result["report_md"],
+                    kind="md",
+                )
+                result["saved_doc_id"] = doc["id"]
+            self._send(200, json.dumps(result, ensure_ascii=False))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _skills_registry_post(self):
+        """POST /api/skills-registry/{save,delete,refine}: Governed Skills Registry."""
+        if self.path not in ("/api/skills-registry/save", "/api/skills-registry/delete", "/api/skills-registry/refine"):
+            return False
+        if not self._local_ui_request(post=True):
+            self._send(403, json.dumps({"ok": False, "error": "Skills registry actions only from this PC"}))
+            return True
+        if not optional_modules.is_enabled(SETTINGS, "skills_registry"):
+            self._send(403, json.dumps({"ok": False, "error": "Governed Skills Registry module is disabled. Enable it in /modules."}))
+            return True
+        try:
+            payload = json.loads(self._body() or b"{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            if self.path.endswith("/save"):
+                tools_raw = payload.get("allowed_tools") or []
+                if isinstance(tools_raw, str):
+                    tools_raw = [x.strip() for x in tools_raw.split(",") if x.strip()]
+                skill = skills_registry.save_skill(
+                    DATA_DIR,
+                    skill_id=str(payload.get("id") or payload.get("skill_id") or ""),
+                    name=str(payload.get("name") or ""),
+                    description=str(payload.get("description") or ""),
+                    body=str(payload.get("body") or ""),
+                    tier=str(payload.get("tier") or "read"),
+                    enabled=bool(payload.get("enabled", True)),
+                    allowed_tools=list(tools_raw),
+                )
+                result = {"ok": True, "skill": skill}
+            elif self.path.endswith("/delete"):
+                result = skills_registry.delete_skill(DATA_DIR, str(payload.get("id") or payload.get("skill_id") or ""))
+            else:
+                result = skills_registry.refine_skill(
+                    DATA_DIR,
+                    skill_id=str(payload.get("id") or payload.get("skill_id") or ""),
+                    feedback=str(payload.get("feedback") or ""),
+                    model=str(payload.get("model") or "assist"),
+                )
+            self._send(200, json.dumps(result, ensure_ascii=False))
+        except FileNotFoundError as exc:
+            self._send(404, json.dumps({"ok": False, "error": str(exc)}))
+        except (ValueError, TypeError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
+    def _models_state(self):
+        """Files found, the user's saved choices, and the file each name uses in the running config."""
+        runtime = os.environ.get("ATLAS_RUNTIME_DIR") or HERE
+        state = model_discovery.list_models(runtime, DATA_DIR)
+        current = {}
+        try:
+            with open(os.path.join(DATA_DIR, "llama-swap.generated.yaml"), encoding="utf-8") as f:
+                current = model_discovery.current_assignments(f.read())
+        except OSError:
+            pass
+        return {**state, "current": current}
+
+    def _models_post(self):
+        """POST /api/models/map {map: {alias: path}}. Only paths of .gguf files found by the scan are accepted."""
+        try:
+            payload = json.loads(self._body() or b"{}")
+            mapping = payload.get("map") if isinstance(payload, dict) else None
+            if not isinstance(mapping, dict):
+                raise ValueError("Expected {map: {...}}")
+            known = {str(Path_(f["path"]).resolve()) for f in self._models_state()["files"]}
+            clean = {}
+            for alias, path in mapping.items():
+                if alias not in model_discovery.ALIASES:
+                    raise ValueError(f"Unknown model name: {alias}")
+                if str(Path_(path).resolve()) not in known:
+                    raise ValueError(f"{alias}: that file is not in a models folder")
+                clean[alias] = path
+            model_discovery.save_overrides(DATA_DIR, clean)
+            self._send(200, json.dumps({"ok": True, "saved": sorted(clean)}))
+        except (ValueError, OSError) as exc:
+            self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        return True
+
     def _do_post(self):
+        if self._ctf_conduit_post():
+            return
+        if self.path == "/api/models/map":
+            return self._models_post()
+        if self._modules_post():
+            return
+        if self._compare_post():
+            return
+        if self._docs_post():
+            return
+        if self._scheduler_post() or self._packs_post():
+            return
+        if self._research_post():
+            return
+        if self._skills_registry_post():
+            return
         if self._compute_post():
             return
         if self._test_suite_post():
@@ -2159,6 +3065,29 @@ class Handler(BaseHTTPRequestHandler):
                 row = ctx_sync.note(DATA_DIR, sync_project(payload.get("project")), payload.get("text"),
                                     "atlas-chat", str(payload.get("kind") or "note"))
                 return self._send(200, json.dumps({"ok": True, "note": row}, ensure_ascii=False))
+            except (ValueError, TypeError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path == "/api/cloud/keys":
+            if not self._local_ui_request(post=True):
+                return self._send(403, json.dumps({"ok": False, "error": "Cloud keys only from this PC"}))
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                view = cloud_llm.save_keys(payload)
+                return self._send(200, json.dumps({"ok": True, **view}, ensure_ascii=False))
+            except (ValueError, TypeError, OSError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
+        if self.path == "/api/cloud/probe":
+            if not self._local_ui_request(post=True):
+                return self._send(403, json.dumps({"ok": False, "error": "Cloud probe only from this PC"}))
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    payload = {}
+                prov = str(payload.get("provider") or "").strip() or None
+                res = cloud_llm.probe(provider=prov)
+                return self._send(200, json.dumps({"ok": True, **res}, ensure_ascii=False))
             except (ValueError, TypeError) as exc:
                 return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if self.path == "/api/context/compact":
@@ -2391,6 +3320,21 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 event = _MCP_AUDIT_RECORDER.record(event, context)
                 return self._send(400, json.dumps(event, ensure_ascii=False, default=str))
+        if self.path == "/api/chat/stop":
+            if not self._local_ui_request(post=True):
+                return self._send(403, json.dumps({"ok": False, "error": "Stop only from this PC"}))
+            try:
+                rid = str(json.loads(self._body() or b"{}").get("request_id") or "")[:128]
+            except (ValueError, UnicodeDecodeError, AttributeError):
+                rid = ""
+            tok = _STOP_TOKENS.pop(rid, None)
+            if tok is not None:
+                tok.set()
+            elif rid:
+                _STOPPED_IDS[rid] = True
+                if len(_STOPPED_IDS) > 200:
+                    _STOPPED_IDS.pop(next(iter(_STOPPED_IDS)), None)
+            return self._send(200, json.dumps({"ok": True, "stopped": tok is not None}))
         if self.path == "/api/state":
             raw = self._body()
             try:
@@ -2450,6 +3394,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": True, "run_id": run_id, "archived": archived}))
         if self.path == "/api/export":
             return self._export()
+        if self.path in ("/api/browser", "/api/github"):
+            try:
+                payload = json.loads(self._body() or b"{}")
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a JSON object")
+                setter = _set_browser if self.path == "/api/browser" else _set_github
+                return self._send(200, json.dumps({"ok": True, **setter(payload)}))
+            except (ValueError, OSError) as exc:
+                return self._send(400, json.dumps({"ok": False, "error": str(exc)}))
         if self.path == "/api/workspace":
             try:
                 payload = json.loads(self._body() or b"{}")
@@ -2506,6 +3459,10 @@ def create_server():
     """Create (but do not start) the local HTTP server so the desktop launcher owns it."""
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     httpd.daemon_threads = True
+    try:
+        task_scheduler.start_background_ticker(DATA_DIR, lambda: SETTINGS)
+    except Exception:
+        pass
     try:
         import hw_proxy; hw_proxy.start(UPSTREAM_HOST, UPSTREAM_PORT)
     except Exception:

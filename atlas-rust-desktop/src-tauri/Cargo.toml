@@ -19,6 +19,8 @@ sha2 = "0.10"
 hex = "0.4"
 thiserror = "2"
 ring = "0.17.14"
+tauri-plugin-oauth = "2"
+tauri-plugin-opener = "2.7.3"
 
 
 [target.'cfg(windows)'.dependencies]

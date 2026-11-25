@@ -7,6 +7,11 @@ from collections import Counter
 import upstream_auth
 
 TOKEN_RE = re.compile(r"[\w.-]{2,}", re.UNICODE)
+_STOPWORDS = frozenset(
+    "the a an and or of to in on for with is are was were be been it this that these those you your i me my we our "
+    "what which who how why when where do does did can could would should will shall about from into at by as "
+    "not no yes if then than so just please tell show give make get".split()
+)
 _FASTEMBED_CACHE = {}
 
 def chunks(text, size=1800, overlap=220):
@@ -70,7 +75,10 @@ def build_records(items, distillations, read_source, host, port, embedding_model
     return records
 
 def search(records, query, host, port, embedding_model, limit=8):
-    qtokens=Counter(_tokens(query)); scored=[]
+    raw_tokens = _tokens(query)
+    meaningful = [t for t in raw_tokens if t not in _STOPWORDS]
+    qtokens = Counter(meaningful or raw_tokens)
+    scored = []
     qvec=None
     if embedding_model and any(r.get("vector") for r in records):
         try: qvec=embed([query],host,port,embedding_model)[0]

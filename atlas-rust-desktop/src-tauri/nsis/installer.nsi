@@ -40,10 +40,6 @@ ManifestDPIAwareness PerMonitorV2
 ${StrCase}
 ${StrLoc}
 
-{{#if installer_hooks}}
-!include "{{installer_hooks}}"
-{{/if}}
-
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 !define MANUFACTURER "{{manufacturer}}"
@@ -58,6 +54,12 @@ ${StrLoc}
 !define HEADERIMAGE "{{header_image}}"
 !define UNINSTALLERICON "{{uninstaller_icon}}"
 !define UNINSTALLERHEADERIMAGE "{{uninstaller_header_image}}"
+
+; Include installer hooks AFTER PRODUCTNAME and other defines are set so macros/functions
+; inside hooks (e.g. install-dir.nsh) resolve ${PRODUCTNAME} instead of literal text.
+{{#if installer_hooks}}
+!include "{{installer_hooks}}"
+{{/if}}
 !define MAINBINARYNAME "{{main_binary_name}}"
 !define MAINBINARYSRCPATH "{{main_binary_path}}"
 !define BUNDLEID "{{bundle_id}}"
@@ -695,11 +697,12 @@ Section VCRedist
 SectionEnd
 
 Section Install
-  SetOutPath $INSTDIR
-
   !ifmacrodef NSIS_HOOK_PREINSTALL
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
+
+  ; Always set $OUTDIR AFTER preinstall hooks so any $INSTDIR update applies to File /oname writes.
+  SetOutPath $INSTDIR
 
   !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 

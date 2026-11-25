@@ -8,13 +8,14 @@ import os
 import urllib.request
 
 _KEY_NAMES = (
-    "GEMINI_API_KEY", "OPENROUTER_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY",
-    "MISTRAL_API_KEY", "GITHUB_TOKEN", "GH_MODELS_KEY", "XAI_API_KEY", "GROK_API_KEY",
-    "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY", "VERTEX_API_KEY", "GOOGLE_CLOUD_API_KEY", "OPENROUTER_API_KEY",
+    "GROQ_API_KEY", "CEREBRAS_API_KEY", "MISTRAL_API_KEY", "GITHUB_TOKEN", "GH_MODELS_KEY",
+    "XAI_API_KEY", "GROK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
 )
 for _k in list(os.environ):
-    if _k in _KEY_NAMES or _k.startswith(("ATLAS_CLOUD", "ATLAS_GEMINI", "ATLAS_REVIEW_LOCAL")):
+    if _k in _KEY_NAMES or _k.startswith(("ATLAS_CLOUD", "ATLAS_GEMINI", "ATLAS_VERTEX", "ATLAS_REVIEW_LOCAL", "ATLAS_SWARM_CLOUD_OFFLOAD")):
         del os.environ[_k]
+os.environ["ATLAS_CLOUD_KEYS_FILE"] = ""
 
 # The PC also has a system proxy (127.0.0.1:7897, env AND registry). Through it, a fake host answers
 # "HTTP 502" instead of "host not found". Tests that want a proxy set ATLAS_CLOUD_PROXY themselves.

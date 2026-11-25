@@ -1,0 +1,36 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@import "./style.css" layer(components);
+@import "./atlas-node.css" layer(components);
+
+@layer components {
+  .feature-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    overflow: auto;
+    background: #0b0f17;
+    color: #e2e8f0;
+  }
+  /* Neutralize legacy style.css bare button/header/footer rules inside Tailwind feature tabs */
+  .feature-pane button {
+    background: transparent;
+    border: 0 solid transparent;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+  }
+  .feature-pane button:hover {
+    border-color: inherit;
+  }
+  .feature-pane header {
+    border-bottom: 0;
+    padding: 0;
+  }
+  .feature-pane footer {
+    margin-top: 0;
+    font: inherit;
+    color: inherit;
+  }
+}

@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
-SETTINGS_FILE = BASE_DIR / "settings.json"
+# Same file as server.py (DATA_DIR = ATLAS_DATA_DIR or this folder), so swarm workers use the user's upstream_port.
+SETTINGS_FILE = Path(os.environ.get("ATLAS_DATA_DIR") or BASE_DIR) / "settings.json"
 
 _DEFAULTS: dict[str, Any] = {
     "server_port": 8090,

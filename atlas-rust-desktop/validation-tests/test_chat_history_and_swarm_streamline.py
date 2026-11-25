@@ -149,7 +149,7 @@ class UiAndFrameStreamlineTests(unittest.TestCase):
         # Swarm bar & tree organization
         self.assertIn("ACTIVE RUNS", html)
         self.assertIn("RECENT RUNS", html)
-        self.assertRegex(html, r"#swarmBar\{[^}]*flex:none[^}]*max-height:[^}]*overflow:auto")
+        self.assertRegex(html, r"#swarmBar\{[^}]*flex:0 1 auto;min-height:0[^}]*max-height:[^}]*overflow-y:auto[^}]*overflow-x:hidden")
         # Chat history archive / unarchive & unified Swarm Board
         self.assertIn("toggleChatArchive", html)
         self.assertIn("ARCHIVED", html)

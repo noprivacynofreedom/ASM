@@ -1087,6 +1087,19 @@ impl OwnedChildren {
                     }
                 }
             };
+            // The user's own llama-swap (settings.json: llama_swap_exe + llama_swap_config) wins over the
+            // packaged one, so a hand-tuned config starts with Atlas. Used only when both files exist.
+            let user_pair = match (
+                settings.get("llama_swap_exe").and_then(Value::as_str).filter(|v| !v.trim().is_empty()),
+                settings.get("llama_swap_config").and_then(Value::as_str).filter(|v| !v.trim().is_empty()),
+            ) {
+                (Some(e), Some(c)) => {
+                    let (e, c) = (resolve_root_path(&root, e), resolve_root_path(&root, c));
+                    if e.is_file() && c.is_file() { Some((e, c)) } else { None }
+                }
+                _ => None,
+            };
+            let (exe_path, config_path) = user_pair.unwrap_or((exe_path, config_path));
             if !exe_path.is_file() {
                 return Err(format!(
                     "llama-swap executable not found: {}",

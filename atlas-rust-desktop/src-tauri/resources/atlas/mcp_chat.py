@@ -6,9 +6,11 @@ import json
 import os
 import threading
 import re
+import socket
 import time
 import uuid
 
+import chat_timing
 import compute_peers
 
 
@@ -35,6 +37,9 @@ TOOL_TIERS = {
     "atlas_list_files": "read", "atlas_read_file": "read",
     "write_file": "write", "write_project_file": "write",
     "web_search": "consequential",  # the query leaves this PC
+    "atlas_list_conversations": "read", "atlas_swarm_runs": "read", "atlas_archive_item": "write",
+    # swarm_workspace_mcp.py (atlas-swarm-workspace): read-only discovery of a run's saved files
+    "swarm_runs": "read", "swarm_files": "read", "swarm_read_file": "read",
     # book_tools.py (atlas_library)
     "list_books": "read", "read_chapter": "read", "search_book": "read",
     # ctx_sync.py serve (shared project context)
@@ -43,6 +48,11 @@ TOOL_TIERS = {
     "browser_get_text": "read", "browser_screenshot": "read", "browser_tabs": "read", "browser_wait": "read",
     "browser_open": "write", "browser_click": "write", "browser_type": "write", "browser_press": "write",
     "browser_eval": "write", "browser_close": "write",
+    # github_mcp.py (atlas_github): writes post on GitHub, so they always ask
+    "github_list_repos": "read", "github_list_issues": "read", "github_get_issue": "read",
+    "github_list_prs": "read", "github_get_pr": "read", "github_get_file": "read", "github_list_branches": "read",
+    "github_create_issue": "consequential", "github_comment": "consequential", "github_create_branch": "consequential",
+    "github_put_file": "consequential", "github_create_pr": "consequential",
     # test_suite_mcp.py (atlas_test_suite)
     "test_suite_list": "read",
     "test_suite_add": "write", "test_suite_update": "write", "test_suite_log_run": "write",
@@ -127,13 +137,70 @@ def denied_message(tool, decision):
     return f"The tool call '{tool}' {why}. It did not run. Do not retry it; tell the user what you wanted to do."
 
 
+class Cancelled(RuntimeError):
+    """The chat window went away. Stop the model call so the single llama.cpp slot is free again."""
+
+
+class CancelToken:
+    """Set by the server when the client disconnects. set() also cuts the open upstream socket,
+    which makes llama-server stop generating (an orphaned generation blocks the next message)."""
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._conn = None
+
+    def attach(self, conn):
+        self._conn = conn
+        if self._event.is_set():
+            self._cut()
+
+    def _cut(self):
+        try:
+            sock = getattr(self._conn, "sock", None)
+            if sock is not None:
+                sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+
+    def set(self):
+        self._event.set()
+        self._cut()
+
+    def is_set(self):
+        return self._event.is_set()
+
+    def check(self):
+        if self._event.is_set():
+            raise Cancelled("client disconnected")
+
+
+_ACTIVE = threading.local()  # per tool-loop thread: cancel token and request id
+
+
+def _token():
+    return getattr(_ACTIVE, "cancel", None)
+
+
 class NoLiveTools(RuntimeError):
     """No MCP/library tool is usable right now. The caller should answer with plain chat, not fail."""
+
+
+def _is_loaded(host, port, model):
+    """True when llama-swap already holds this model in memory (None when it does not say)."""
+    try:
+        import context_engine
+        names = context_engine.running_models(host, port, compute_peers.headers_for(host, port, {}))
+        return None if names is None else str(model) in names
+    except Exception:
+        return None
 
 
 def _post(host, port, request, timeout=900):
     """Send a non-streaming completion and preserve upstream diagnostics."""
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    tok = _token()
+    if tok is not None:
+        tok.attach(conn)
     try:
         body = json.dumps(request, ensure_ascii=False).encode("utf-8")
         conn.request(
@@ -327,7 +394,7 @@ def normalize_system_messages(messages):
     return [{"role": "system", "content": merged}] + rest
 
 
-def _finalize_empty_answer(request, messages, completion, choices, events, host, port):
+def _finalize_empty_answer(request, messages, completion, choices, events, host, port, on_delta=None):
     """Make one bounded text-only retry if the model returned no user-facing text."""
     choice = choices[0] if choices and isinstance(choices[0], dict) else {}
     message = choice.get("message")
@@ -364,12 +431,13 @@ def _finalize_empty_answer(request, messages, completion, choices, events, host,
         requested_tokens = int(retry.get("max_tokens") or 2048)
     except (TypeError, ValueError, OverflowError):
         requested_tokens = 2048
-    retry["max_tokens"] = max(1024, min(requested_tokens, 4096))
+    retry["chat_template_kwargs"] = {**(retry.get("chat_template_kwargs") or {}), "enable_thinking": False}
+    retry["max_tokens"] = max(1024, min(requested_tokens, 4096))  # thinking is off for this retry
 
-    recovered = _complete(host, port, retry)
+    recovered = _complete_streaming(host, port, retry, on_delta) if on_delta is not None else _complete(host, port, retry)
     return _ensure_text_only(
         recovered,
-        "I couldn't produce a complete final answer. Please retry; no private reasoning is displayed.",
+        "The model used its whole token budget on hidden reasoning and gave no answer, even after a retry with thinking off. Send the message again, or ask a shorter question.",
     ), events
 
 
@@ -400,19 +468,360 @@ def _complete(host, port, request):
     return completion
 
 
-def run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60):
-    """Bounded tool loop. The final completion carries atlas_usage_total: usage summed over every round."""
-    _USAGE.total = {}
+def first_token_timeout():
+    """Seconds to wait for the model server to start answering. A cold model load takes about 2 minutes."""
     try:
-        completion, events = _run_tool_loop(request, monitor, record, host, port, max_rounds, tool_timeout)
+        return max(30.0, float(os.environ.get("ATLAS_FIRST_TOKEN_TIMEOUT", "300")))
+    except ValueError:
+        return 300.0
+
+
+def thinking_enabled(request):
+    kw = request.get("chat_template_kwargs")
+    return not (isinstance(kw, dict) and kw.get("enable_thinking") is False)
+
+
+def token_budget(request, requested, cap):
+    """max_tokens for a request. A thinking model spends tokens on hidden reasoning before the answer,
+    so a small budget (the UI sends 2048) ends with reasoning only and no answer. Give thinking a larger floor."""
+    floor = 8192 if thinking_enabled(request) else 1024
+    return max(floor, min(requested, cap))
+
+
+def _stream_completion(host, port, request, on_delta=None):
+    """Stream an OpenAI-compatible completion from upstream.
+
+    Forwards each content delta to on_delta(text) as it arrives so the UI can show
+    tokens live instead of waiting for the whole generation. Returns a completion dict
+    shaped exactly like _post() (choices[0].message with content and/or tool_calls, plus
+    usage/timings when the server sends them). Falls back to the proven non-streaming
+    _post() when the stream cannot start, or fails before a single token was emitted.
+    """
+    req = dict(request)
+    req["stream"] = True
+    opts = req.get("stream_options") if isinstance(req.get("stream_options"), dict) else {}
+    req["stream_options"] = {**opts, "include_usage": True}
+    tok = _token()
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=first_token_timeout())
+        if tok is not None:
+            tok.attach(conn)
+        body = json.dumps(req, ensure_ascii=False).encode("utf-8")
+        conn.request(
+            "POST", "/v1/chat/completions", body=body,
+            headers=compute_peers.headers_for(host, port, {"Content-Type": "application/json", "Accept": "text/event-stream"}),
+        )
+        response = conn.getresponse()
+        if getattr(conn, "sock", None) is not None:
+            conn.sock.settimeout(900)  # the first-token limit is over; later gaps may be long
+    except TimeoutError as exc:
+        conn.close()
+        if tok is not None:
+            tok.check()
+        raise RuntimeError(
+            f"No first token from the model after {first_token_timeout():.0f} s. The model server may be stuck "
+            "(model load, or an earlier request holding the only slot). Nothing was lost: send the message again. "
+            "See logs\\llama-swap.log in the Atlas data folder.") from exc
+    except (OSError, http.client.HTTPException):
+        if tok is not None:
+            tok.check()
+        # Could not even open the stream: use the proven non-streaming transport.
+        return _post(host, port, {**request, "stream": False})
+
+    emitted = False
+    try:
+        if not 200 <= response.status < 300:
+            raw = response.read().decode("utf-8", "replace")
+            raise RuntimeError(f"llama-swap upstream HTTP {response.status}: {raw[:4000]}")
+
+        ctype = (response.getheader("Content-Type") or "").lower()
+        if "text/event-stream" not in ctype:
+            # Upstream ignored stream=true (some peers / proxies answer with one JSON body):
+            # parse it as a normal completion and surface the whole answer as a single delta.
+            raw = response.read().decode("utf-8", "replace")
+            try:
+                completion = json.loads(raw)
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError(f"Upstream returned invalid JSON: {raw[:1000]}") from exc
+            if not isinstance(completion, dict):
+                raise RuntimeError("Upstream returned a non-object completion")
+            if callable(on_delta):
+                choices = completion.get("choices")
+                choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+                text = _content_text(choice.get("message")) if isinstance(choice.get("message"), dict) else ""
+                if text:
+                    try:
+                        on_delta(text)
+                    except Exception:
+                        pass
+            return completion
+
+        content_parts = []
+        reasoning_chars = 0
+        tool_calls = {}
+        finish_reason = None
+        usage = None
+        timings = None
+        meta = {"id": None, "model": None, "created": None}
+        buf = ""
+        while True:
+            chunk = response.read1(8192) if hasattr(response, "read1") else response.read(8192)
+            if tok is not None:
+                tok.check()
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", "replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if not line or line.startswith(":") or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    continue
+                try:
+                    j = json.loads(data)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(j, dict):
+                    continue
+                if j.get("error"):  # llama-swap / llama-server reports a failure inside the stream
+                    err = j["error"]
+                    text = err.get("message") if isinstance(err, dict) else err
+                    raise RuntimeError(f"llama-swap upstream error: {str(text)[:500]}")
+                for key in ("id", "model", "created"):
+                    if j.get(key) and not meta[key]:
+                        meta[key] = j.get(key)
+                if isinstance(j.get("usage"), dict):
+                    usage = j["usage"]
+                if isinstance(j.get("timings"), dict):
+                    timings = j["timings"]
+                choices = j.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    continue
+                ch0 = choices[0] if isinstance(choices[0], dict) else {}
+                if ch0.get("finish_reason"):
+                    finish_reason = ch0["finish_reason"]
+                delta = ch0.get("delta") if isinstance(ch0.get("delta"), dict) else {}
+                if isinstance(delta.get("reasoning_content"), str):
+                    reasoning_chars += len(delta["reasoning_content"])
+                piece = delta.get("content")
+                if isinstance(piece, str) and piece:
+                    content_parts.append(piece)
+                    if callable(on_delta):
+                        on_delta(piece)
+                        emitted = True
+                dtc = delta.get("tool_calls")
+                if isinstance(dtc, list):
+                    for tc in dtc:
+                        if not isinstance(tc, dict):
+                            continue
+                        slot = tool_calls.setdefault(
+                            tc.get("index", 0),
+                            {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+                        )
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        if tc.get("type"):
+                            slot["type"] = tc["type"]
+                        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                        if fn.get("name"):
+                            slot["function"]["name"] = fn["name"]
+                        if isinstance(fn.get("arguments"), str):
+                            slot["function"]["arguments"] += fn["arguments"]
+    except RuntimeError:
+        raise  # a real upstream error (non-2xx); surface it like _post() does
+    except Exception:
+        if tok is not None and tok.is_set():
+            raise Cancelled("client disconnected")
+        if emitted:
+            raise  # mid-stream failure after tokens were shown: do not silently restart
+        return _post(host, port, {**request, "stream": False})
+    finally:
+        conn.close()
+
+    if not content_parts and not tool_calls and not reasoning_chars and not usage and not timings and not finish_reason:
+        # The stream ended with nothing: no text, no tool call, no usage. Typical when llama-server exits
+        # or llama-swap drops the request while the model loads. Never show this as a finished empty reply.
+        raise RuntimeError("The model server closed the stream with no answer (the model may have failed to load "
+                           "or crashed). See logs\\llama-swap.log in the Atlas data folder, then try again.")
+    message = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[k] for k in sorted(tool_calls.keys())]
+        message["content"] = "".join(content_parts) or None
+    completion = {
+        "id": meta["id"] or "chatcmpl-atlas",
+        "object": "chat.completion",
+        "created": meta["created"] or int(time.time()),
+        "model": meta["model"] or req.get("model") or "atlas",
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason or ("tool_calls" if tool_calls else "stop"),
+        }],
+    }
+    if isinstance(usage, dict):
+        completion["usage"] = usage
+    if isinstance(timings, dict):
+        completion["timings"] = timings
+    if reasoning_chars:
+        completion["atlas_reasoning_chars"] = reasoning_chars  # diagnostics only: thinking text that never reaches the chat
+    return completion
+
+
+_RECOVER_LAST = [0.0]
+_REAP_PS = ("$ids=(Get-Process).Id; Get-CimInstance Win32_Process -Filter \"Name='llama-server.exe'\" | "
+            "Where-Object { $ids -notcontains $_.ParentProcessId } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }")
+
+
+def reap_orphan_llama_servers():
+    """Windows only: stop llama-server.exe processes whose parent (llama-swap) is gone. They hold the port and
+    the VRAM, and the next model start then fails. Returns the list of stopped process ids."""
+    if os.name != "nt" or os.environ.get("ATLAS_NO_REAP") == "1":
+        return []
+    import subprocess
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _REAP_PS],
+                             capture_output=True, text=True, timeout=20,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except Exception:
+        return []
+    return [int(x) for x in out.split() if x.isdigit()]
+
+
+def recover_model_server(host, port, reason=""):
+    """After a failed model start: unload through llama-swap and stop orphan llama-server processes.
+    At most once per 15 s. Returns True when a retry is worth trying."""
+    low = str(reason).lower()
+    if not any(k in low for k in ("closed the stream", "exited prematurely", "502", "bad gateway", "upstream")):
+        return False
+    if host not in ("127.0.0.1", "localhost", "::1") or time.time() - _RECOVER_LAST[0] < 15:
+        return False
+    _RECOVER_LAST[0] = time.time()
+    try:
+        c = http.client.HTTPConnection(host, port, timeout=10)
+        c.request("POST", "/unload")
+        c.getresponse().read()
+        c.close()
+    except Exception:
+        pass
+    reap_orphan_llama_servers()
+    time.sleep(2)
+    return True
+
+
+def _complete_streaming(host, port, request, on_delta):
+    """Streaming sibling of _complete(): forwards content deltas and keeps the usage total."""
+    try:
+        completion = _stream_completion(host, port, request, on_delta=on_delta)
+    except RuntimeError as first:
+        # The model failed to start (llama-swap: "upstream command exited prematurely", or an empty stream)
+        # before any token was shown. Clear dead model processes once and try again, so the user does not
+        # have to stop llama-server by hand.
+        tok = getattr(_ACTIVE, "cancel", None)
+        if (tok is not None and tok.is_set()) or not recover_model_server(host, port, str(first)):
+            raise
+        completion = _stream_completion(host, port, request, on_delta=on_delta)
+    usage = completion.get("usage") if isinstance(completion, dict) else None
+    total = getattr(_USAGE, "total", None)
+    if isinstance(usage, dict) and total is not None:
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            if isinstance(usage.get(key), (int, float)):
+                total[key] = total.get(key, 0) + int(usage[key])
+        total["rounds"] = total.get("rounds", 0) + 1
+    return completion
+
+
+def summarize_tool_events(events):
+    """Return a UI-safe compact list of executed tool calls for the chat Action History card."""
+    out = []
+    for ev in events or []:
+        if not isinstance(ev, dict):
+            continue
+        dur = ev.get("duration_ms")
+        if dur is None:
+            dur = ev.get("adapter_duration_ms")
+        out.append({
+            "tool": str(ev.get("tool") or "tool")[:120],
+            "server": str(ev.get("server") or "")[:80],
+            "status": str(ev.get("status") or "UNKNOWN")[:40],
+            "duration_ms": round(float(dur), 1) if isinstance(dur, (int, float)) else None,
+            "args_preview": str(ev.get("args_preview") or "")[:240],
+            "error": str(ev.get("error") or "")[:300] or None,
+            "trace_id": str(ev.get("trace_id") or ev.get("call_id") or "")[:64] or None,
+        })
+    return out
+
+
+def has_live_tools(monitor, request=None):
+    """Return True when at least one live MCP tool is available for this request."""
+    existing = (request or {}).get("tools") or []
+    if not isinstance(existing, list):
+        existing = []
+    reserved_names = {
+        item.get("function", {}).get("name")
+        for item in existing
+        if isinstance(item, dict) and isinstance(item.get("function"), dict)
+        and isinstance(item.get("function", {}).get("name"), str)
+    }
+    available, _ = _tool_definitions(monitor, reserved_names)
+    return bool(available)
+
+
+def run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60, on_event=None, on_delta=None,
+                  cancel=None, trace_id=None):
+    """Bounded tool loop. The final completion carries atlas_usage_total and atlas_tool_events.
+
+    When on_delta is given, the model's answer is produced with a streaming upstream call
+    and each content token is forwarded to on_delta(text) as it arrives.
+    """
+    _USAGE.total = {}
+    _ACTIVE.cancel, _ACTIVE.trace_id = cancel, trace_id
+    try:
+        completion, events = _run_tool_loop(
+            request, monitor, record, host, port, max_rounds, tool_timeout, on_event=on_event, on_delta=on_delta
+        )
     finally:
         total, _USAGE.total = _USAGE.total, None
+        _ACTIVE.cancel = _ACTIVE.trace_id = None
     if isinstance(completion, dict) and total:
         completion["atlas_usage_total"] = total
+    if isinstance(completion, dict) and events:
+        completion["atlas_tool_events"] = summarize_tool_events(events)
     return completion, events
 
 
-def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60):
+def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_timeout=60, on_event=None, on_delta=None):
+    def _do_complete(payload):
+        # Stream the model call when the caller wants live tokens; the non-streaming
+        # path (on_delta=None) stays byte-for-byte identical and keeps using _post_completion.
+        tok = _token()
+        if tok is not None:
+            tok.check()
+        t0, first, loaded = time.time(), [None], _is_loaded(host, port, payload.get("model"))
+
+        def timed_delta(piece):
+            if first[0] is None:
+                first[0] = time.time()
+            return on_delta(piece)
+
+        completion, err = None, None
+        try:
+            if on_delta is not None:
+                completion = _complete_streaming(host, port, payload, timed_delta)
+            else:
+                completion = _complete(host, port, payload)
+            return completion
+        except Exception as exc:
+            err = f"error:{type(exc).__name__}:{str(exc)[:120]}"
+            raise
+        finally:
+            t1 = time.time()
+            chat_timing.write(chat_timing.entry(
+                getattr(_ACTIVE, "trace_id", None), payload.get("model"), t0,
+                first[0] or (t1 if on_delta is None else None), t1, completion, loaded,
+                "cancelled" if (tok is not None and tok.is_set()) else err, chat_timing.breakdown(payload)))
+
     req = dict(request)
     req.pop("stream_options", None)
     messages = list(req.get("messages") or [])
@@ -440,7 +849,7 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
         requested_tokens = int(req.get("max_tokens") or 2048)
     except (TypeError, ValueError, OverflowError):
         requested_tokens = 2048
-    req["max_tokens"] = max(1024, min(requested_tokens, 8192))
+    req["max_tokens"] = token_budget(req, requested_tokens, 16384)
     req["messages"] = messages
     req["tools"] = existing + available
     req["tool_choice"] = "auto"
@@ -456,7 +865,7 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
 
     attempted_operations = set()
     for _round_no in range(round_limit):
-        completion = _complete(host, port, {**req, "messages": list(messages)})
+        completion = _do_complete({**req, "messages": list(messages)})
         choices = completion.get("choices") if isinstance(completion, dict) else None
         if not isinstance(choices, list) or not choices:
             raise RuntimeError("Upstream returned no completion choices")
@@ -469,7 +878,7 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
             raise RuntimeError("Upstream returned an invalid tool_calls array")
         if not calls:
             messages.append(message)
-            return _finalize_empty_answer(req, messages, completion, choices, events, host, port)
+            return _finalize_empty_answer(req, messages, completion, choices, events, host, port, on_delta=on_delta)
 
         # Preserve the assistant tool-call message before its matching tool
         # responses, as required by the OpenAI-compatible conversation format.
@@ -568,6 +977,9 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
             event["adapter_duration_ms"] = round(
                 (time.perf_counter_ns() - adapter_started_ns) / 1_000_000, 3
             )
+            if args_error is None:
+                event.setdefault("args_preview", summarize_args(arguments))
+            event.setdefault("call_id", call_id)
             event.setdefault("timestamp", time.time())
             events.append(event)
             try:
@@ -578,6 +990,12 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
             except Exception as exc:
                 # Do not lose the tool result because an optional audit sink failed.
                 event["audit_record_error"] = f"{type(exc).__name__}: {exc}"
+
+            if callable(on_event):
+                try:
+                    on_event(summarize_tool_events(events))
+                except Exception:
+                    pass
 
             messages.append({"role": "tool", "tool_call_id": call_id, "content": content[:32000]})
 
@@ -602,10 +1020,10 @@ def _run_tool_loop(request, monitor, record, host, port, max_rounds=5, tool_time
         completion,
         "Execution stopped at the MCP tool-round limit. Some requested work may be unfinished.",
     )
-    return _finalize_empty_answer(req, messages, completion, completion["choices"], events, host, port)
+    return _finalize_empty_answer(req, messages, completion, completion["choices"], events, host, port, on_delta=on_delta)
 
 
-def as_sse(completion):
+def as_sse(completion, events=None):
     """Encode a completed OpenAI response as the SSE format Atlas's UI expects."""
     choices = completion.get("choices") if isinstance(completion, dict) else None
     choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
@@ -630,4 +1048,35 @@ def as_sse(completion):
             chunk["timings"] = completion["timings"]
         if isinstance(completion.get("atlas_usage_total"), dict):
             chunk["atlas_usage_total"] = completion["atlas_usage_total"]
+        tool_events = completion.get("atlas_tool_events")
+        if not tool_events and events:
+            tool_events = summarize_tool_events(events)
+        if isinstance(tool_events, list) and tool_events:
+            chunk["atlas_tool_events"] = tool_events
+    return "data: " + json.dumps(chunk, ensure_ascii=False) + "\n\ndata: [DONE]\n\n"
+
+
+def as_sse_trailer(completion, events=None):
+    """Closing SSE chunk when the answer was already streamed live: it carries only the
+    final usage/timings/tool events (no content, so nothing is duplicated) and ends the
+    stream with [DONE]."""
+    chunk = {
+        "id": completion.get("id", "chatcmpl-atlas") if isinstance(completion, dict) else "chatcmpl-atlas",
+        "object": "chat.completion.chunk",
+        "created": completion.get("created", int(time.time())) if isinstance(completion, dict) else int(time.time()),
+        "model": completion.get("model", "atlas") if isinstance(completion, dict) else "atlas",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    if isinstance(completion, dict):
+        if isinstance(completion.get("usage"), dict):
+            chunk["usage"] = completion["usage"]
+        if isinstance(completion.get("timings"), dict):
+            chunk["timings"] = completion["timings"]
+        if isinstance(completion.get("atlas_usage_total"), dict):
+            chunk["atlas_usage_total"] = completion["atlas_usage_total"]
+        tool_events = completion.get("atlas_tool_events")
+        if not tool_events and events:
+            tool_events = summarize_tool_events(events)
+        if isinstance(tool_events, list) and tool_events:
+            chunk["atlas_tool_events"] = tool_events
     return "data: " + json.dumps(chunk, ensure_ascii=False) + "\n\ndata: [DONE]\n\n"

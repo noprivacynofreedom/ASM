@@ -18,7 +18,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.join(HERE, "..", "src-tauri", "resources", "atlas");
 const FAKE_PORT = 18411, APP_PORT = 18412;
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-e2e-"));
-fs.writeFileSync(path.join(data, "settings.json"), JSON.stringify({ server_port: APP_PORT, upstream_port: FAKE_PORT, embedding_model: "", mcp_auto_tools: false }));
+fs.writeFileSync(path.join(data, "settings.json"), JSON.stringify({ server_port: APP_PORT, upstream_port: FAKE_PORT, embedding_model: "", mcp_auto_tools: false,
+  exact_token_count: true }));  // opt-in since 5b6bdf1 (speed); this test checks the exact path
 const py = process.platform === "win32" ? "python" : "python3";
 const procs = [
   spawn(py, [path.join(HERE, "fake_llama_swap.py"), String(FAKE_PORT), "8192"], { stdio: "inherit" }),
@@ -113,9 +114,10 @@ try {
   await page.locator("#log .msg.assistant").last().getByRole("button", { name: "BRANCH" }).click();
   await page.waitForFunction(() => /^↳ /.test(chat().title) && chat().messages.length === 2);
   await page.fill("#chatSearch", "zzz-no-such-chat");
-  assert.match(await page.textContent("#chats"), /No chats match/);
+  // Search re-renders after a 120 ms debounce (94ac4f5), so wait for the list, do not read it at once.
+  await page.waitForFunction(() => /No chats match/.test(document.querySelector("#chats").textContent), null, { timeout: 5000 });
   await page.fill("#chatSearch", "VIP store");
-  assert.ok((await page.$$("#chats li button.open")).length >= 2);
+  await page.waitForFunction(() => document.querySelectorAll("#chats li button.open").length >= 2, null, { timeout: 5000 });
   await page.fill("#chatSearch", ""); await page.dispatchEvent("#chatSearch", "input");
   ok("BRANCH makes a new chat; search filters by title and content");
 
@@ -147,3 +149,4 @@ try {
   console.error("E2E FAILED after", passed, "checks:", e.message);
   process.exitCode = 1;
 } finally { stop(); fs.rmSync(data, { recursive: true, force: true }); }
+process.exit(process.exitCode || 0);  // an open browser after a failure kept node alive

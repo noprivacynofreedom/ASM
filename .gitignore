@@ -49,6 +49,14 @@ exports/
 /build-tools/
 /atlas-rust-desktop/src-tauri/core-staging/
 
+# Secrets and local editor settings: never commit
+/atlas-rust-desktop/.env
+.vscode/
+
+# Local test/run logs (may contain personal paths): never commit
+*.log
+*.err.log
+
 # Local scratch, reviews, handoffs, and private license/config files
 /LICENSE.local
 /HANDOFF-COMPUTE-SHARING.md

@@ -18,6 +18,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
 BUNDLE = ROOT / "atlas-rust-desktop" / "src-tauri" / "resources" / "atlas"
+SCRIPTS_STARTED_AT_RUNTIME = ("browser_mcp.py", "github_mcp.py", "test_suite_mcp.py", "swarm_workspace_mcp.py")
 
 
 def local_modules(folder):
@@ -69,6 +70,11 @@ def main(argv=sys.argv):
                              cwd=bundle, env=env, capture_output=True, text=True, timeout=120)
         if run.returncode != 0:
             problems.append("importing server.py failed:\n" + run.stderr.strip()[-1500:])
+
+    # 3. Scripts the backend starts as child processes (never imported, so step 1 cannot see them).
+    for script in SCRIPTS_STARTED_AT_RUNTIME:
+        if not (bundle / script).is_file():
+            problems.append(f"{script} is not in the bundle (the built-in browser tools start it as an MCP server)")
 
     if problems:
         print("BUNDLE CHECK FAILED:")

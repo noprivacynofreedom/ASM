@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+
+const CtfApp = lazy(() => import('./features/ctf/App'));
+const ConduitApp = lazy(() => import('./features/conduit/App'));
+const SwarmCoordApp = lazy(() => import('./features/swarm-coord/App'));
 
 type Health = { atlas_api: boolean; llama_swap: boolean; atlas_api_detail: string; llama_detail: string };
 type Metrics = { cpu_percent: number; memory_used_bytes: number; memory_total_bytes: number };
@@ -151,7 +155,7 @@ function OperationsDashboard({selectedConversationId,onOpenSwarmBoard}:{selected
 }
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null); const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [message, setMessage] = useState('Starting Atlas services…'); const [error, setError] = useState(''); const [ready, setReady] = useState(false); const [busy, setBusy] = useState(false); const [view,setView]=useState<'chat'|'node'|'ops'|'swap'>('chat'); const [swapLoaded,setSwapLoaded]=useState(false);
+  const [message, setMessage] = useState('Starting Atlas services…'); const [error, setError] = useState(''); const [ready, setReady] = useState(false); const [busy, setBusy] = useState(false); const [view,setView]=useState<'chat'|'node'|'ops'|'swap'|'ctf'|'conduit'|'workflows'|'tests'>('chat'); const [swapLoaded,setSwapLoaded]=useState(false); const [testsLoaded,setTestsLoaded]=useState(false);
   const [selectedConversationId,setSelectedConversationId]=useState<string|null>(null);
   const chatFrameRef=useRef<HTMLIFrameElement|null>(null);
   const healthInFlightRef=useRef(false);
@@ -202,6 +206,11 @@ export default function App() {
   useEffect(()=>{void start();},[start]);
   // Fast checks only while starting. Once ready, a slow health check feeds the llama-swap banner; none while the window is hidden.
   useEffect(()=>{const timer=window.setInterval(()=>{if(!document.hidden)void refresh();},ready?15000:2500);return()=>window.clearInterval(timer);},[ready,refresh]);
+  // Cache-bust the chat iframe URL once per app launch. WebView2 serves a stale cached
+  // document for http://127.0.0.1:8090 even with Cache-Control: no-cache, which made every
+  // frontend (index.html) change appear not to land. A fresh query each launch forces a real
+  // fetch. Same origin, so chat history (data.json via /api/state) and localStorage are untouched.
+  const chatUrlRef = useRef('http://127.0.0.1:8090/?v=' + Date.now());
   const openChatView = useCallback(() => {
     setView('chat');
     window.requestAnimationFrame(() => {
@@ -209,13 +218,13 @@ export default function App() {
       if (!frame) return;
       try {
         if (!frame.src || !frame.src.startsWith('http://127.0.0.1:8090')) {
-          frame.src = 'http://127.0.0.1:8090';
+          frame.src = chatUrlRef.current;
           return;
         }
         frame.contentWindow?.postMessage({ type: 'atlas:show-chat', version: 1 }, 'http://127.0.0.1:8090');
         frame.contentWindow?.dispatchEvent(new Event('resize'));
       } catch {
-        frame.src = 'http://127.0.0.1:8090';
+        frame.src = chatUrlRef.current;
       }
     });
   }, []);
@@ -226,17 +235,17 @@ export default function App() {
       if (!frame) return;
       try {
         if (!frame.src || !frame.src.startsWith('http://127.0.0.1:8090')) {
-          frame.src = 'http://127.0.0.1:8090';
+          frame.src = chatUrlRef.current;
           return;
         }
         frame.contentWindow?.postMessage({ type: 'atlas:open-swarm-board', version: 1 }, 'http://127.0.0.1:8090');
         frame.contentWindow?.dispatchEvent(new Event('resize'));
       } catch {
-        frame.src = 'http://127.0.0.1:8090';
+        frame.src = chatUrlRef.current;
       }
     });
   }, []);
   const memoryPct=metrics?.memory_total_bytes?metrics.memory_used_bytes/metrics.memory_total_bytes*100:0;
-  if(ready)return <div className="app-frame"><div className="frame-bar"><span className="frame-brand">✦ ATLAS</span><div className={`frame-status${health&&!health.atlas_api?' offline':''}`} title="MCP via Atlas Host"><i/> {health&&!health.atlas_api?'API OFFLINE':'ONLINE'}</div><nav className="desktop-nav" aria-label="Pages"><button className={view==='chat'?'selected':''} aria-current={view==='chat'?'page':undefined} onClick={openChatView}>CHAT</button><button className={view==='node'?'selected':''} aria-current={view==='node'?'page':undefined} onClick={()=>setView('node')}>ATLAS NODE</button><button className={view==='ops'?'selected':''} aria-current={view==='ops'?'page':undefined} onClick={()=>setView('ops')}>OPERATIONS</button><button className={view==='swap'?'selected':''} aria-current={view==='swap'?'page':undefined} onClick={()=>{setSwapLoaded(true);setView('swap');}}>LLAMA-SWAP</button></nav><button className="frame-refresh" onClick={()=>void refresh()} title="Refresh service status" aria-label="Refresh status">↻ STATUS</button></div><iframe ref={chatFrameRef} title="Atlas Chat" src="http://127.0.0.1:8090" style={{display:view==='chat'?'block':'none'}} aria-hidden={view!=='chat'} tabIndex={view==='chat'?0:-1}/>{swapLoaded&&<iframe title="llama-swap" src="http://127.0.0.1:8080/ui/#" style={{display:view==='swap'?'block':'none'}} aria-hidden={view!=='swap'} tabIndex={view==='swap'?0:-1}/>}{view==='swap'&&health&&!health.llama_swap&&<div style={{padding:'6px 12px',font:'11px var(--atlas-mono)',color:'#fbbf24',background:'#1c1509',borderBottom:'1px solid #854d0e'}}>llama-swap is not answering on port 8080. {health.llama_detail}</div>}{view==='node'?<NodeDashboard/>:view==='ops'?<OperationsDashboard selectedConversationId={selectedConversationId} onOpenSwarmBoard={openSwarmBoard}/>:null}</div>;
+  if(ready)return <div className="app-frame"><div className="frame-bar"><span className="frame-brand">✦ ATLAS</span><div className={`frame-status${health&&!health.atlas_api?' offline':''}`} title="MCP via Atlas Host"><i/> {health&&!health.atlas_api?'API OFFLINE':'ONLINE'}</div><nav className="desktop-nav" aria-label="Pages"><button className={view==='chat'?'selected':''} aria-current={view==='chat'?'page':undefined} onClick={openChatView}>CHAT</button><button className={view==='tests'?'selected':''} aria-current={view==='tests'?'page':undefined} onClick={()=>{setTestsLoaded(true);setView('tests');}}>TEST SUITE</button><button className={view==='node'?'selected':''} aria-current={view==='node'?'page':undefined} onClick={()=>setView('node')}>ATLAS NODE</button><button className={view==='ops'?'selected':''} aria-current={view==='ops'?'page':undefined} onClick={()=>setView('ops')}>OPERATIONS</button><button className={view==='ctf'?'selected':''} aria-current={view==='ctf'?'page':undefined} onClick={()=>setView('ctf')}>CTF</button><button className={view==='conduit'?'selected':''} aria-current={view==='conduit'?'page':undefined} onClick={()=>setView('conduit')}>CONDUIT</button><button className={view==='workflows'?'selected':''} aria-current={view==='workflows'?'page':undefined} onClick={()=>setView('workflows')}>WORKFLOWS</button><button className={view==='swap'?'selected':''} aria-current={view==='swap'?'page':undefined} onClick={()=>{setSwapLoaded(true);setView('swap');}}>LLAMA-SWAP</button></nav><button className="frame-refresh" onClick={()=>void refresh()} title="Refresh service status" aria-label="Refresh status">↻ STATUS</button></div><iframe ref={chatFrameRef} title="Atlas Chat" src={chatUrlRef.current} style={{display:view==='chat'?'block':'none'}} aria-hidden={view!=='chat'} tabIndex={view==='chat'?0:-1}/>{testsLoaded&&<iframe title="Atlas Test Suite" src="http://127.0.0.1:8090/test-suite" style={{display:view==='tests'?'block':'none'}} aria-hidden={view!=='tests'} tabIndex={view==='tests'?0:-1}/>}{swapLoaded&&<iframe title="llama-swap" src="http://127.0.0.1:8080/ui/#" style={{display:view==='swap'?'block':'none'}} aria-hidden={view!=='swap'} tabIndex={view==='swap'?0:-1}/>}{view==='swap'&&health&&!health.llama_swap&&<div style={{padding:'6px 12px',font:'11px var(--atlas-mono)',color:'#fbbf24',background:'#1c1509',borderBottom:'1px solid #854d0e'}}>llama-swap is not answering on port 8080. {health.llama_detail}</div>}{view==='node'?<NodeDashboard/>:view==='ops'?<OperationsDashboard selectedConversationId={selectedConversationId} onOpenSwarmBoard={openSwarmBoard}/>:view==='ctf'?<div className="feature-pane dark"><Suspense fallback={<div style={{padding:24,color:'#a99abf'}}>Loading Atlas CTF…</div>}><CtfApp/></Suspense></div>:view==='conduit'?<div className="feature-pane dark"><Suspense fallback={<div style={{padding:24,color:'#a99abf'}}>Loading Conduit…</div>}><ConduitApp/></Suspense></div>:view==='workflows'?<div className="feature-pane dark"><Suspense fallback={<div style={{padding:24,color:'#a99abf'}}>Loading Workflows…</div>}><SwarmCoordApp/></Suspense></div>:null}</div>;
   return <main className="shell"><header><div className="brand"><span className="mark">✦</span><b>ATLAS</b><small>RUST DESKTOP // LOCAL-FIRST RUNTIME</small></div><button onClick={start} disabled={busy}>{busy?'STARTING…':'RETRY START'}</button></header><section className="hero"><div><label>DESKTOP BOOTSTRAP</label><h1>Your local AI workspace is coming online.</h1><p>The Rust desktop shell supervises only the processes it starts. Your existing Atlas web interface, chats, MCP host and local models remain in the project folder.</p><p className="message">{message}</p></div><div className="ctx">LOCAL FIRST<br/><strong>RUST + REACT</strong><br/><small>PYTHON COMPATIBILITY BRIDGE</small></div></section><section className="grid"><article><label>ATLAS API · 8090</label><strong className={health?.atlas_api?'ok':'bad'}>{health?.atlas_api?'ONLINE':'WAITING'}</strong><small>{health?.atlas_api_detail||'Checking readiness…'}</small></article><article><label>LLAMA-SWAP · 8080</label><strong className={health?.llama_swap?'ok':'bad'}>{health?.llama_swap?'ONLINE':'WAITING'}</strong><small>{health?.llama_detail||'Checking readiness…'}</small></article><article><label>CPU</label><strong>{metrics?metrics.cpu_percent.toFixed(1)+'%':'—'}</strong><small>System-wide usage</small></article><article><label>MEMORY</label><strong>{metrics?(metrics.memory_used_bytes/1073741824).toFixed(1)+' GB':'—'}</strong><small>{metrics?`${memoryPct.toFixed(1)}% of ${(metrics.memory_total_bytes/1073741824).toFixed(1)} GB`:'Waiting'}</small><div className="bar"><i style={{width:`${memoryPct}%`}}/></div></article></section>{error&&<pre className="error">{error}{'\n\n'}Check that Python 3, llama-swap and the configured files in settings.json are available. Logs: logs/atlas-server.log and logs/llama-swap.log.</pre>}<section className="activity"><label>RUNTIME CONTRACT</label><p>Existing UI and Python orchestration are retained as a compatibility layer for this test build. MCP discovery and tool execution are wired into normal model chat. Rust owns desktop startup, health checks, system telemetry and shutdown. Tool execution is audited; execution alone is never labelled VERIFIED.</p><div className="states"><span className="verified">VERIFIED · independent proof</span><span className="unverified">EXECUTED_UNVERIFIED · tool ran</span><span className="failed">FAILED · execution/verification failed</span></div></section><footer>ATLAS · NO GLOBAL TASKKILL · NO DATA RESET · EXISTING PYTHON UI PRESERVED</footer></main>;
 }

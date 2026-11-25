@@ -5,7 +5,7 @@ mod process_supervisor;
 mod sandbox;
 mod telemetry;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
@@ -13,7 +13,8 @@ use std::{
         Arc,
     },
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 
 #[derive(Default)]
@@ -22,6 +23,90 @@ struct RuntimeState {
     shutdown_started: AtomicBool,
     shutdown_complete: AtomicBool,
 }
+
+#[derive(Deserialize)]
+struct GoogleTokenResponse {
+    id_token: Option<String>,
+    access_token: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OAuthTokens {
+    id_token: String,
+    access_token: String,
+}
+
+#[tauri::command]
+async fn start_google_oauth(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    auth_url: String,
+) -> Result<u16, String> {
+    let config = tauri_plugin_oauth::OauthConfig {
+        response: Some(
+            "<html><body style='font-family:sans-serif;text-align:center;padding-top:4rem;'>
+            <h2>Authentication complete</h2>
+            <p>You can close this browser tab and return to Atlas.</p>
+            </body></html>"
+                .into(),
+        ),
+        ..Default::default()
+    };
+
+    let port = tauri_plugin_oauth::start_with_config(config, move |url| {
+        let _ = window.emit("google-oauth-callback", url);
+    })
+    .map_err(|e| e.to_string())?;
+
+    let full_url = auth_url.replace("__PORT__", &port.to_string());
+    app.opener()
+        .open_url(&full_url, None::<&str>)
+        .map_err(|e| format!("Failed to open system browser: {e}"))?;
+
+    Ok(port)
+}
+
+#[tauri::command]
+async fn exchange_google_code(
+    code: String,
+    code_verifier: String,
+    redirect_uri: String,
+    client_id: String,
+    client_secret: String,
+) -> Result<OAuthTokens, String> {
+    let client = reqwest::Client::new();
+    let params = [
+        ("code", code.as_str()),
+        ("client_id", client_id.as_str()),
+        ("client_secret", client_secret.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("grant_type", "authorization_code"),
+        ("code_verifier", code_verifier.as_str()),
+    ];
+
+    let res = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("Token request failed: {e}"))?;
+
+    if !res.status().is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("Google token exchange error: {body}"));
+    }
+
+    let parsed: GoogleTokenResponse = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token JSON: {e}"))?;
+
+    Ok(OAuthTokens {
+        id_token: parsed.id_token.ok_or("Missing id_token in response")?,
+        access_token: parsed.access_token.unwrap_or_default(),
+    })
+}
+
 /// Everything Atlas Chat stores lives under here: %LOCALAPPDATA%\atlas-chat\data.
 /// A private build can name another folder: build-release.ps1 reads "data_root" from
 /// local-build.json (never exported) into ATLAS_BUILD_DATA_ROOT at compile time.
@@ -70,6 +155,7 @@ impl NodeState {
         }
     }
 }
+
 #[derive(Serialize)]
 struct Health {
     atlas_api: bool,
@@ -97,6 +183,7 @@ async fn health_check() -> Health {
             .unwrap_or_else(|e| e.to_string()),
     }
 }
+
 /// True when something accepts a TCP connection at the URL's host and port.
 /// An iframe fires onLoad for error pages too, so the UI asks this first.
 #[tauri::command]
@@ -330,6 +417,8 @@ async fn node_benchmark_local(
 fn main() {
     pin_storage_to_f();
     tauri::Builder::default()
+        .plugin(tauri_plugin_oauth::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(RuntimeState::default())
         .manage(NodeState::new())
         .manage(Arc::new(sandbox::Sandbox::new()))
@@ -399,7 +488,9 @@ fn main() {
             node_execute_workload,
             node_contribution_ledger,
             node_local_models,
-            node_benchmark_local
+            node_benchmark_local,
+            start_google_oauth,
+            exchange_google_code
         ])
         .build(tauri::generate_context!())
         .expect("error while building Atlas")
@@ -452,3 +543,4 @@ fn main() {
             }
         });
 }
+

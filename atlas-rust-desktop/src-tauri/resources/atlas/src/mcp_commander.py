@@ -253,6 +253,7 @@ def _swarm_tool_definitions():
             }),
         },
     ]
+    # Note: reading a run's saved files moved to the built-in 'swarm_workspace' MCP server (swarm_workspace_mcp.py).
     if not _readonly():
         tools.append({
             "name": "atlas_archive_item",
